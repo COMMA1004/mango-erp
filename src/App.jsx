@@ -222,7 +222,7 @@ export default function App() {
 
   // ── DB 저장 헬퍼 함수들 ───────────────────────────────────────
   const saveProduct = async (prod, isNew) => {
-    const row = { id:prod.id, name:prod.name, unit:prod.unit, buy_price:prod.buyPrice, sell_price:0, stock:prod.stock, tax_type:prod.taxType };
+    const row = { id:prod.id, name:prod.name, unit:prod.unit, buy_price:prod.buyPrice, sell_price:prod.sellPrice, stock:prod.stock, tax_type:prod.taxType };
     const { error } = isNew ? await supabase.from("products").insert(row) : await supabase.from("products").update(row).eq("id", prod.id);
     if (error) alert("저장 실패: " + error.message);
   };
@@ -445,13 +445,14 @@ function InventoryPage({ products, setProducts, dbFns }) {
   const [adjustNote, setAdjustNote] = useState("");
   const [saving,     setSaving]     = useState(false);
 
-  const openAdd = () => { setForm({ id:genId("P"), name:"", unit:"개", buyPrice:"", stock:"", taxType:"과세" }); setModal("add"); };
+  const openAdd = () => { setForm({ id:genId("P"), name:"", unit:"개", buyPrice:"", sellPrice:"", stock:"", taxType:"과세" }); setModal("add"); };
 
   const saveProduct = async () => {
     setSaving(true);
     const prod = { ...form, buyPrice:+form.buyPrice, sellPrice:+form.sellPrice, stock:+form.stock, taxType:form.taxType||"과세" };
     await dbFns.saveProduct(prod, modal==="add");
-    // Realtime이 자동으로 화면 반영 (이중등록 방지)
+    if (modal==="add") setProducts(prev=>[...prev, prod]);
+    else setProducts(prev=>prev.map(p=>p.id===prod.id?prod:p));
     setSaving(false); setModal(null);
   };
 
@@ -459,7 +460,7 @@ function InventoryPage({ products, setProducts, dbFns }) {
     setSaving(true);
     const newStock = Math.max(0, form.stock + +adjustQty);
     await dbFns.updateStock(form.id, newStock);
-    // Realtime이 자동 반영
+    setProducts(prev=>prev.map(p=>p.id===form.id?{...p,stock:newStock}:p));
     setSaving(false); setModal(null);
   };
 
@@ -476,6 +477,7 @@ function InventoryPage({ products, setProducts, dbFns }) {
           { key:"name",      label:"상품명" },
           { key:"taxType",   label:"과세구분", render:r=><Badge label={r.taxType||"과세"} color={r.taxType==="면세"?COLORS.cyan:COLORS.accent}/> },
           { key:"buyPrice",  label:"매입단가",   align:"right", render:r=>`₩${fmt(r.buyPrice)}` },
+          { key:"sellPrice", label:"매출단가",   align:"right", render:r=>`₩${fmt(r.sellPrice)}` },
           { key:"stock",     label:"현재고",     align:"right", render:r=><span style={{ color:r.stock<100?COLORS.red:COLORS.green, fontWeight:700 }}>{fmt(r.stock)}</span> },
           { key:"value",     label:"재고금액(매입)", align:"right", render:r=>`₩${fmt(r.stock*r.buyPrice)}` },
           { key:"actions",   label:"관리", render:r=>(
@@ -491,7 +493,10 @@ function InventoryPage({ products, setProducts, dbFns }) {
           <span style={{ color:COLORS.textDim, fontWeight:700 }}>총 재고금액 (매입가)</span>
           <span style={{ color:COLORS.accent, fontWeight:800, fontSize:18 }}>₩{fmt(products.reduce((s,p)=>s+p.stock*p.buyPrice,0))}</span>
         </div>
-
+        <div style={{ display:"flex", justifyContent:"space-between", marginTop:8 }}>
+          <span style={{ color:COLORS.textDim, fontWeight:700 }}>총 재고금액 (매출가)</span>
+          <span style={{ color:COLORS.green, fontWeight:800, fontSize:18 }}>₩{fmt(products.reduce((s,p)=>s+p.stock*p.sellPrice,0))}</span>
+        </div>
       </Card>
 
       {(modal==="add"||modal==="edit") && (
@@ -511,7 +516,10 @@ function InventoryPage({ products, setProducts, dbFns }) {
                 ))}
               </div>
             </div>
-            <Input label="매입단가 (원)" type="number" value={form.buyPrice} onChange={e=>setForm({...form,buyPrice:e.target.value})} />
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <Input label="매입단가(원)" type="number" value={form.buyPrice}  onChange={e=>setForm({...form,buyPrice:e.target.value})} />
+              <Input label="매출단가(원)" type="number" value={form.sellPrice} onChange={e=>setForm({...form,sellPrice:e.target.value})} />
+            </div>
             {modal==="add" && <Input label="초기 재고(개)" type="number" value={form.stock} onChange={e=>setForm({...form,stock:e.target.value})} />}
             <div style={{ display:"flex", gap:8, justifyContent:"flex-end", marginTop:8 }}>
               <Btn variant="ghost" onClick={()=>setModal(null)}>취소</Btn>
@@ -544,21 +552,20 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
   const [filter,          setFilter]          = useState("전체");
   const [commissionModal, setCommissionModal] = useState(null);
   const [saving,          setSaving]          = useState(false);
-  const [form, setForm] = useState({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1,price:""}], note:"" });
+  const [form, setForm] = useState({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1}], note:"" });
 
   const allPartners = form.type==="도매" ? wholesalePartners : retailPartners;
-  const calcTotal   = items => items.reduce((s,it)=>{ const price = it.price!==""?+it.price:0; return s+(price*+it.qty); },0);
+  const calcTotal   = items => items.reduce((s,it)=>{ const p=products.find(x=>x.id===it.productId); return s+(p?p.sellPrice*it.qty:0); },0);
 
   const submit = async () => {
     const partner = allPartners.find(p=>p.id===form.partnerId);
     if (!partner || form.items.some(it=>!it.productId)) return alert("거래처와 상품을 모두 선택하세요.");
     setSaving(true);
     const total = calcTotal(form.items);
-    const newOrder = { id:genId("ORD"), date:form.date, type:form.type, partner:partner.name, partnerId:form.partnerId, channel:"", platformOrderId:"", items:form.items.map(it=>({ ...it, qty:+it.qty, price:it.price!==""?+it.price:0 })), status:"대기", total, note:form.note||"" };
+    const newOrder = { id:genId("ORD"), date:form.date, type:form.type, partner:partner.name, partnerId:form.partnerId, channel:"", platformOrderId:"", items:form.items.map(it=>({...it,qty:+it.qty,price:products.find(p=>p.id===it.productId)?.sellPrice||0})), status:"대기", total, note:form.note||"" };
     await dbFns.saveOrder(newOrder);
-    // Realtime이 자동으로 화면 반영 (로컬 setState 제거로 이중등록 방지)
     setSaving(false); setModal(false);
-    setForm({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1,price:""}], note:"" });
+    setForm({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1}], note:"" });
   };
 
   const processOrder = async (orderId) => {
@@ -599,7 +606,20 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
           { key:"date",    label:"일자" },
           { key:"type",    label:"유형",   render:r=><Badge label={r.type} color={r.type==="도매"?COLORS.purple:COLORS.cyan}/> },
           { key:"partner", label:"거래처" },
-          { key:"items",   label:"품목수", align:"center", render:r=>`${r.items.length}종` },
+          { key:"items", label:"출고 품목 / 수량 / 단가", render:r=>(
+            <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
+              {r.items.map((it,i)=>{
+                const prod = products.find(p=>p.id===it.productId);
+                return (
+                  <div key={i} style={{ fontSize:12 }}>
+                    <span style={{ color:COLORS.textDim }}>{prod?.name || it.productId}</span>
+                    <span style={{ color:COLORS.text, fontWeight:700 }}> × {fmt(it.qty)}개</span>
+                    {it.price>0 && <span style={{ color:COLORS.textMuted }}> @ ₩{fmt(it.price)}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )},
           { key:"total",   label:"출고금액", align:"right", render:r=>`₩${fmt(r.total)}` },
           { key:"status",  label:"상태",   render:r=><Badge label={r.status} color={r.status==="출고완료"?COLORS.green:COLORS.accent}/> },
           { key:"actions", label:"", render:r=>(
@@ -653,31 +673,17 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
             </Select>
             <div>
               <div style={{ color:COLORS.textDim, fontSize:12, fontWeight:700, marginBottom:8 }}>출고 품목</div>
-              {/* 컬럼 헤더 */}
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 80px 120px 24px", gap:8, marginBottom:4 }}>
-                <div style={{ color:COLORS.textMuted, fontSize:11 }}>상품명</div>
-                <div style={{ color:COLORS.textMuted, fontSize:11 }}>수량</div>
-                <div style={{ color:COLORS.textMuted, fontSize:11 }}>단가(원) ✏️</div>
-                <div></div>
-              </div>
               {form.items.map((it,i)=>(
-                <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 80px 120px 24px", gap:8, marginBottom:8, alignItems:"center" }}>
-                  <Select value={it.productId} onChange={e=>{
-                    setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,productId:e.target.value,price:""}:x)});
-                  }}>
+                <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 100px auto", gap:8, marginBottom:8, alignItems:"center" }}>
+                  <Select value={it.productId} onChange={e=>setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,productId:e.target.value}:x)})}>
                     <option value="">-- 상품 선택 --</option>
                     {products.map(p=><option key={p.id} value={p.id}>{p.name} (재고:{p.stock})</option>)}
                   </Select>
-                  <Input type="number" placeholder="수량" value={it.qty}
-                    onChange={e=>setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,qty:e.target.value}:x)})} />
-                  <Input type="number" placeholder="단가 직접입력" value={it.price}
-                    onChange={e=>setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,price:e.target.value}:x)})}
-                    style={{ border:`1px solid ${COLORS.accent}66` }} />
-                  <button onClick={()=>setForm({...form,items:form.items.filter((_,idx)=>idx!==i)})}
-                    style={{ background:"none", border:"none", color:COLORS.red, cursor:"pointer", fontSize:16 }}>×</button>
+                  <Input type="number" placeholder="수량" value={it.qty} onChange={e=>setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,qty:e.target.value}:x)})} />
+                  <button onClick={()=>setForm({...form,items:form.items.filter((_,idx)=>idx!==i)})} style={{ background:"none", border:"none", color:COLORS.red, cursor:"pointer", fontSize:16 }}>×</button>
                 </div>
               ))}
-              <Btn variant="ghost" onClick={()=>setForm({...form,items:[...form.items,{productId:"",qty:1,price:""}]})} style={{ fontSize:12 }}>+ 품목 추가</Btn>
+              <Btn variant="ghost" onClick={()=>setForm({...form,items:[...form.items,{productId:"",qty:1}]})} style={{ fontSize:12 }}>+ 품목 추가</Btn>
             </div>
             <div style={{ background:COLORS.bg, borderRadius:8, padding:12 }}>
               <div style={{ display:"flex", justifyContent:"space-between" }}>
@@ -802,7 +808,7 @@ function InvoicesPage({ invoices, setInvoices, dbFns }) {
   const toggleStatus = async (id, current) => {
     const next = current==="미수금"?"완료":"미수금";
     await dbFns.updateInvoiceStatus(id, next);
-    // Realtime이 자동 반영
+    setInvoices(prev=>prev.map(i=>i.id===id?{...i,status:next}:i));
   };
 
   return (
@@ -1015,12 +1021,8 @@ function SalesPage({ orders, products, wholesalePartners, retailPartners }) {
   const wholesale = completed.filter(o=>o.type==="도매");
   const retail    = completed.filter(o=>o.type==="온라인소매");
   const productSales = products.map(p=>{
-    const { sold, revenue } = completed.reduce((acc,o)=>{
-      const it = o.items.find(i=>i.productId===p.id);
-      if(!it) return acc;
-      return { sold:acc.sold+it.qty, revenue:acc.revenue+it.price*it.qty };
-    },{ sold:0, revenue:0 });
-    const cost = sold * p.buyPrice;
+    const sold = completed.reduce((s,o)=>{ const it=o.items.find(i=>i.productId===p.id); return s+(it?it.qty:0); },0);
+    const revenue=sold*p.sellPrice, cost=sold*p.buyPrice;
     return { ...p, sold, revenue, cost, profit:revenue-cost };
   }).sort((a,b)=>b.revenue-a.revenue);
 
