@@ -289,7 +289,13 @@ export default function App() {
     </div>
   );
 
-  const dbFns = { saveProduct, updateStock, saveOrder, updateOrderStatus, saveInvoice, updateInvoiceStatus, saveWholesalePartner, updateWholesalePartner, saveRetailPartner };
+  const deleteOrder = async (id) => {
+    const { error } = await supabase.from("orders").delete().eq("id", id);
+    if (error) alert("삭제 실패: " + error.message);
+    // Realtime이 자동 반영
+  };
+
+  const dbFns = { saveProduct, updateStock, saveOrder, updateOrderStatus, deleteOrder, saveInvoice, updateInvoiceStatus, saveWholesalePartner, updateWholesalePartner, saveRetailPartner };
 
   return (
     <div style={{ display:"flex", height:"100vh", background:COLORS.bg, fontFamily:"'Pretendard','Apple SD Gothic Neo',sans-serif", color:COLORS.text }}>
@@ -551,6 +557,7 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
   const [modal,           setModal]           = useState(false);
   const [filter,          setFilter]          = useState("전체");
   const [commissionModal, setCommissionModal] = useState(null);
+  const [deleteTarget,    setDeleteTarget]    = useState(null); // 삭제 확인 대상
   const [saving,          setSaving]          = useState(false);
   const [form, setForm] = useState({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1}], note:"" });
 
@@ -606,29 +613,54 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
           { key:"date",    label:"일자" },
           { key:"type",    label:"유형",   render:r=><Badge label={r.type} color={r.type==="도매"?COLORS.purple:COLORS.cyan}/> },
           { key:"partner", label:"거래처" },
-          { key:"items", label:"출고 품목 / 수량 / 단가", render:r=>(
-            <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
-              {r.items.map((it,i)=>{
-                const prod = products.find(p=>p.id===it.productId);
-                return (
-                  <div key={i} style={{ fontSize:12 }}>
-                    <span style={{ color:COLORS.textDim }}>{prod?.name || it.productId}</span>
-                    <span style={{ color:COLORS.text, fontWeight:700 }}> × {fmt(it.qty)}개</span>
-                    {it.price>0 && <span style={{ color:COLORS.textMuted }}> @ ₩{fmt(it.price)}</span>}
-                  </div>
-                );
-              })}
-            </div>
-          )},
+          { key:"items",   label:"품목수", align:"center", render:r=>`${r.items.length}종` },
           { key:"total",   label:"출고금액", align:"right", render:r=>`₩${fmt(r.total)}` },
           { key:"status",  label:"상태",   render:r=><Badge label={r.status} color={r.status==="출고완료"?COLORS.green:COLORS.accent}/> },
           { key:"actions", label:"", render:r=>(
             <div style={{ display:"flex", gap:6 }}>
               {r.status==="대기" && <Btn variant="success" style={{ padding:"4px 10px", fontSize:12 }} onClick={()=>processOrder(r.id)}>출고처리</Btn>}
+              <Btn variant="danger" style={{ padding:"4px 10px", fontSize:12 }} onClick={()=>setDeleteTarget(r)}>🗑️</Btn>
             </div>
           )},
         ]} rows={filtered} />
       </Card>
+
+      {/* 삭제 확인 모달 */}
+      {deleteTarget && (
+        <Modal title="출고 삭제 확인" onClose={()=>setDeleteTarget(null)}>
+          <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+            <div style={{ background:COLORS.bg, borderRadius:10, padding:16 }}>
+              <div style={{ color:COLORS.textMuted, fontSize:12, marginBottom:8 }}>삭제할 출고 정보</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:6, fontSize:13 }}>
+                {[
+                  ["주문번호", deleteTarget.id],
+                  ["일자",     deleteTarget.date],
+                  ["거래처",   deleteTarget.partner],
+                  ["출고금액", `₩${fmt(deleteTarget.total)}`],
+                  ["상태",     deleteTarget.status],
+                ].map(([k,v])=>(
+                  <div key={k} style={{ display:"flex", justifyContent:"space-between" }}>
+                    <span style={{ color:COLORS.textMuted }}>{k}</span>
+                    <span style={{ color:COLORS.text, fontWeight:600 }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {deleteTarget.status === "출고완료" && (
+              <div style={{ background:COLORS.red+"11", border:`1px solid ${COLORS.red}44`, borderRadius:8, padding:12, fontSize:12, color:COLORS.red }}>
+                ⚠️ 이미 출고완료된 건입니다. 삭제해도 재고는 자동으로 복구되지 않습니다. 재고는 수동으로 조정해 주세요.
+              </div>
+            )}
+            <div style={{ background:COLORS.red+"11", border:`1px solid ${COLORS.red}44`, borderRadius:8, padding:12, fontSize:12, color:COLORS.red }}>
+              🗑️ 삭제하면 복구할 수 없습니다. 정말 삭제하시겠습니까?
+            </div>
+            <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setDeleteTarget(null)}>취소</Btn>
+              <Btn variant="danger" onClick={async()=>{ await dbFns.deleteOrder(deleteTarget.id); setDeleteTarget(null); }}>삭제 확인</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {commissionModal && (
         <Modal title="영업대행수수료 안내" onClose={()=>setCommissionModal(null)}>
