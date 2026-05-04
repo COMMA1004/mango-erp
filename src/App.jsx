@@ -222,7 +222,7 @@ export default function App() {
 
   // ── DB 저장 헬퍼 함수들 ───────────────────────────────────────
   const saveProduct = async (prod, isNew) => {
-    const row = { id:prod.id, name:prod.name, unit:prod.unit, buy_price:prod.buyPrice, sell_price:0, stock:prod.stock, tax_type:prod.taxType };
+    const row = { id:prod.id, name:prod.name, unit:prod.unit, buy_price:prod.buyPrice, sell_price:prod.sellPrice, stock:prod.stock, tax_type:prod.taxType };
     const { error } = isNew ? await supabase.from("products").insert(row) : await supabase.from("products").update(row).eq("id", prod.id);
     if (error) alert("저장 실패: " + error.message);
   };
@@ -449,10 +449,9 @@ function InventoryPage({ products, setProducts, dbFns }) {
 
   const saveProduct = async () => {
     setSaving(true);
-    const prod = { ...form, buyPrice:+form.buyPrice, sellPrice:+form.sellPrice, stock:+form.stock, taxType:form.taxType||"과세" };
+    const prod = { ...form, buyPrice:+form.buyPrice, sellPrice:0, stock:+form.stock, taxType:form.taxType||"과세" };
     await dbFns.saveProduct(prod, modal==="add");
-    if (modal==="add") setProducts(prev=>[...prev, prod]);
-    else setProducts(prev=>prev.map(p=>p.id===prod.id?prod:p));
+    // Realtime 구독이 자동으로 화면 업데이트 처리 → 로컬 setState 제거 (중복 방지)
     setSaving(false); setModal(null);
   };
 
@@ -460,7 +459,7 @@ function InventoryPage({ products, setProducts, dbFns }) {
     setSaving(true);
     const newStock = Math.max(0, form.stock + +adjustQty);
     await dbFns.updateStock(form.id, newStock);
-    setProducts(prev=>prev.map(p=>p.id===form.id?{...p,stock:newStock}:p));
+    // Realtime이 자동 반영
     setSaving(false); setModal(null);
   };
 
@@ -555,10 +554,11 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
     if (!partner || form.items.some(it=>!it.productId)) return alert("거래처와 상품을 모두 선택하세요.");
     setSaving(true);
     const total = calcTotal(form.items);
-    const newOrder = { id:genId("ORD"), date:form.date, type:form.type, partner:partner.name, partnerId:form.partnerId, channel:"", platformOrderId:"", items:form.items.map(it=>({...it,qty:+it.qty,price:products.find(p=>p.id===it.productId)?.sellPrice||0})), status:"대기", total, note:form.note||"" };
+    const newOrder = { id:genId("ORD"), date:form.date, type:form.type, partner:partner.name, partnerId:form.partnerId, channel:"", platformOrderId:"", items:form.items.map(it=>({ ...it, qty:+it.qty, price: it.price!==""?+it.price:(products.find(p=>p.id===it.productId)?.sellPrice||0) })), status:"대기", total, note:form.note||"" };
     await dbFns.saveOrder(newOrder);
+    // Realtime이 자동 반영
     setSaving(false); setModal(false);
-    setForm({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1}], note:"" });
+    setForm({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1,price:""}], note:"" });
   };
 
   const processOrder = async (orderId) => {
@@ -698,6 +698,7 @@ function PartnersPage({ wholesalePartners, setWholesalePartners, retailPartners,
     } else {
       await dbFns.saveRetailPartner(form);
     }
+    // Realtime이 자동 반영
     setSaving(false); setModal(false);
   };
 
@@ -781,6 +782,7 @@ function InvoicesPage({ invoices, setInvoices, dbFns }) {
     const tax    = Math.round(amount*0.1);
     const inv    = { id:genId("INV"), date:form.date, type:form.type, partner:form.partner, amount, tax, total:amount+tax, status:form.type==="매출"?"미수금":"완료", note:form.note||"", commissionYM:"", commMethod:"", withhold:0 };
     await dbFns.saveInvoice(inv);
+    // Realtime이 자동 반영
     setSaving(false); setModal(false);
     setForm({ date:today(), type:"매출", partner:"", amount:"", note:"" });
   };
@@ -788,7 +790,7 @@ function InvoicesPage({ invoices, setInvoices, dbFns }) {
   const toggleStatus = async (id, current) => {
     const next = current==="미수금"?"완료":"미수금";
     await dbFns.updateInvoiceStatus(id, next);
-    setInvoices(prev=>prev.map(i=>i.id===id?{...i,status:next}:i));
+    // Realtime이 자동 반영
   };
 
   return (
@@ -1001,14 +1003,13 @@ function SalesPage({ orders, products, wholesalePartners, retailPartners }) {
   const wholesale = completed.filter(o=>o.type==="도매");
   const retail    = completed.filter(o=>o.type==="온라인소매");
   const productSales = products.map(p=>{
-    // 실제 출고 단가 기반으로 매출 계산
-    const { sold, revenue } = completed.reduce((acc, o) => {
-      const it = o.items.find(i => i.productId === p.id);
-      if (!it) return acc;
-      return { sold: acc.sold + it.qty, revenue: acc.revenue + it.price * it.qty };
-    }, { sold: 0, revenue: 0 });
+    const { sold, revenue } = completed.reduce((acc,o)=>{
+      const it = o.items.find(i=>i.productId===p.id);
+      if(!it) return acc;
+      return { sold:acc.sold+it.qty, revenue:acc.revenue+it.price*it.qty };
+    },{ sold:0, revenue:0 });
     const cost = sold * p.buyPrice;
-    return { ...p, sold, revenue, cost, profit: revenue - cost };
+    return { ...p, sold, revenue, cost, profit:revenue-cost };
   }).sort((a,b)=>b.revenue-a.revenue);
 
   return (
