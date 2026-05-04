@@ -222,7 +222,7 @@ export default function App() {
 
   // ── DB 저장 헬퍼 함수들 ───────────────────────────────────────
   const saveProduct = async (prod, isNew) => {
-    const row = { id:prod.id, name:prod.name, unit:prod.unit, buy_price:prod.buyPrice, sell_price:prod.sellPrice, stock:prod.stock, tax_type:prod.taxType };
+    const row = { id:prod.id, name:prod.name, unit:prod.unit, buy_price:prod.buyPrice, sell_price:0, stock:prod.stock, tax_type:prod.taxType };
     const { error } = isNew ? await supabase.from("products").insert(row) : await supabase.from("products").update(row).eq("id", prod.id);
     if (error) alert("저장 실패: " + error.message);
   };
@@ -449,9 +449,9 @@ function InventoryPage({ products, setProducts, dbFns }) {
 
   const saveProduct = async () => {
     setSaving(true);
-    const prod = { ...form, buyPrice:+form.buyPrice, sellPrice:0, stock:+form.stock, taxType:form.taxType||"과세" };
+    const prod = { ...form, buyPrice:+form.buyPrice, sellPrice:+form.sellPrice, stock:+form.stock, taxType:form.taxType||"과세" };
     await dbFns.saveProduct(prod, modal==="add");
-    // Realtime 구독이 자동으로 화면 업데이트 처리 → 로컬 setState 제거 (중복 방지)
+    // Realtime이 자동으로 화면 반영 (이중등록 방지)
     setSaving(false); setModal(null);
   };
 
@@ -544,19 +544,19 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
   const [filter,          setFilter]          = useState("전체");
   const [commissionModal, setCommissionModal] = useState(null);
   const [saving,          setSaving]          = useState(false);
-  const [form, setForm] = useState({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1}], note:"" });
+  const [form, setForm] = useState({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1,price:""}], note:"" });
 
   const allPartners = form.type==="도매" ? wholesalePartners : retailPartners;
-  const calcTotal   = items => items.reduce((s,it)=>{ const p=products.find(x=>x.id===it.productId); return s+(p?p.sellPrice*it.qty:0); },0);
+  const calcTotal   = items => items.reduce((s,it)=>{ const price = it.price!==""?+it.price:0; return s+(price*+it.qty); },0);
 
   const submit = async () => {
     const partner = allPartners.find(p=>p.id===form.partnerId);
     if (!partner || form.items.some(it=>!it.productId)) return alert("거래처와 상품을 모두 선택하세요.");
     setSaving(true);
     const total = calcTotal(form.items);
-    const newOrder = { id:genId("ORD"), date:form.date, type:form.type, partner:partner.name, partnerId:form.partnerId, channel:"", platformOrderId:"", items:form.items.map(it=>({ ...it, qty:+it.qty, price: it.price!==""?+it.price:(products.find(p=>p.id===it.productId)?.sellPrice||0) })), status:"대기", total, note:form.note||"" };
+    const newOrder = { id:genId("ORD"), date:form.date, type:form.type, partner:partner.name, partnerId:form.partnerId, channel:"", platformOrderId:"", items:form.items.map(it=>({ ...it, qty:+it.qty, price:it.price!==""?+it.price:0 })), status:"대기", total, note:form.note||"" };
     await dbFns.saveOrder(newOrder);
-    // Realtime이 자동 반영
+    // Realtime이 자동으로 화면 반영 (로컬 setState 제거로 이중등록 방지)
     setSaving(false); setModal(false);
     setForm({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1,price:""}], note:"" });
   };
@@ -653,17 +653,31 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
             </Select>
             <div>
               <div style={{ color:COLORS.textDim, fontSize:12, fontWeight:700, marginBottom:8 }}>출고 품목</div>
+              {/* 컬럼 헤더 */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 80px 120px 24px", gap:8, marginBottom:4 }}>
+                <div style={{ color:COLORS.textMuted, fontSize:11 }}>상품명</div>
+                <div style={{ color:COLORS.textMuted, fontSize:11 }}>수량</div>
+                <div style={{ color:COLORS.textMuted, fontSize:11 }}>단가(원) ✏️</div>
+                <div></div>
+              </div>
               {form.items.map((it,i)=>(
-                <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 100px auto", gap:8, marginBottom:8, alignItems:"center" }}>
-                  <Select value={it.productId} onChange={e=>setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,productId:e.target.value}:x)})}>
+                <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 80px 120px 24px", gap:8, marginBottom:8, alignItems:"center" }}>
+                  <Select value={it.productId} onChange={e=>{
+                    setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,productId:e.target.value,price:""}:x)});
+                  }}>
                     <option value="">-- 상품 선택 --</option>
                     {products.map(p=><option key={p.id} value={p.id}>{p.name} (재고:{p.stock})</option>)}
                   </Select>
-                  <Input type="number" placeholder="수량" value={it.qty} onChange={e=>setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,qty:e.target.value}:x)})} />
-                  <button onClick={()=>setForm({...form,items:form.items.filter((_,idx)=>idx!==i)})} style={{ background:"none", border:"none", color:COLORS.red, cursor:"pointer", fontSize:16 }}>×</button>
+                  <Input type="number" placeholder="수량" value={it.qty}
+                    onChange={e=>setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,qty:e.target.value}:x)})} />
+                  <Input type="number" placeholder="단가 직접입력" value={it.price}
+                    onChange={e=>setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,price:e.target.value}:x)})}
+                    style={{ border:`1px solid ${COLORS.accent}66` }} />
+                  <button onClick={()=>setForm({...form,items:form.items.filter((_,idx)=>idx!==i)})}
+                    style={{ background:"none", border:"none", color:COLORS.red, cursor:"pointer", fontSize:16 }}>×</button>
                 </div>
               ))}
-              <Btn variant="ghost" onClick={()=>setForm({...form,items:[...form.items,{productId:"",qty:1}]})} style={{ fontSize:12 }}>+ 품목 추가</Btn>
+              <Btn variant="ghost" onClick={()=>setForm({...form,items:[...form.items,{productId:"",qty:1,price:""}]})} style={{ fontSize:12 }}>+ 품목 추가</Btn>
             </div>
             <div style={{ background:COLORS.bg, borderRadius:8, padding:12 }}>
               <div style={{ display:"flex", justifyContent:"space-between" }}>
@@ -698,7 +712,6 @@ function PartnersPage({ wholesalePartners, setWholesalePartners, retailPartners,
     } else {
       await dbFns.saveRetailPartner(form);
     }
-    // Realtime이 자동 반영
     setSaving(false); setModal(false);
   };
 
@@ -782,7 +795,6 @@ function InvoicesPage({ invoices, setInvoices, dbFns }) {
     const tax    = Math.round(amount*0.1);
     const inv    = { id:genId("INV"), date:form.date, type:form.type, partner:form.partner, amount, tax, total:amount+tax, status:form.type==="매출"?"미수금":"완료", note:form.note||"", commissionYM:"", commMethod:"", withhold:0 };
     await dbFns.saveInvoice(inv);
-    // Realtime이 자동 반영
     setSaving(false); setModal(false);
     setForm({ date:today(), type:"매출", partner:"", amount:"", note:"" });
   };
