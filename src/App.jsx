@@ -318,7 +318,7 @@ export default function App() {
         <div style={{ padding:"0 16px" }}>
           <div style={{ background:COLORS.accent+"11", border:`1px solid ${COLORS.accent}33`, borderRadius:10, padding:12 }}>
             <div style={{ color:COLORS.accent, fontSize:10, fontWeight:700, marginBottom:4 }}>총 재고</div>
-            <div style={{ color:COLORS.text, fontSize:18, fontWeight:800 }}>{fmt(products.reduce((s,p)=>s+p.stock,0))} 박스</div>
+            <div style={{ color:COLORS.text, fontSize:18, fontWeight:800 }}>{fmt(products.reduce((s,p)=>s+p.stock,0))} 개</div>
           </div>
         </div>
       </div>
@@ -375,7 +375,7 @@ function DashboardPage({ products, orders, invoices, wholesalePartners }) {
         <h2 style={{ color:COLORS.text, fontSize:22, fontWeight:800, margin:0 }}>대시보드</h2></div>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:16 }}>
         {[
-          { label:"총 재고 (박스)",  value:fmt(totalStock),        color:COLORS.cyan,   icon:"📦" },
+          { label:"총 재고 (개)",  value:fmt(totalStock),        color:COLORS.cyan,   icon:"📦" },
           { label:"총 매출",         value:`₩${fmt(totalSales)}`,  color:COLORS.green,  icon:"📈" },
           { label:"대기 주문",       value:pendingOrders+"건",      color:COLORS.accent, icon:"🕐" },
           { label:"미수금 합계",     value:`₩${fmt(unpaidAR)}`,    color:COLORS.red,    icon:"💰" },
@@ -395,7 +395,7 @@ function DashboardPage({ products, orders, invoices, wholesalePartners }) {
             : lowStock.map(p=>(
               <div key={p.id} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:`1px solid ${COLORS.border}22`, fontSize:13 }}>
                 <span style={{ color:COLORS.text }}>{p.name}</span>
-                <Badge label={`${p.stock}박스`} color={p.stock<50?COLORS.red:COLORS.accent} />
+                <Badge label={`${p.stock}개`} color={p.stock<50?COLORS.red:COLORS.accent} />
               </div>
             ))}
         </Card>
@@ -424,7 +424,7 @@ function DashboardPage({ products, orders, invoices, wholesalePartners }) {
             <div key={p.id} style={{ marginBottom:10 }}>
               <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4, fontSize:12 }}>
                 <span style={{ color:COLORS.textDim }}>{p.name}</span>
-                <span style={{ color:bc, fontWeight:700 }}>{p.stock}박스</span>
+                <span style={{ color:bc, fontWeight:700 }}>{p.stock}개</span>
               </div>
               <div style={{ background:COLORS.bg, borderRadius:4, height:6 }}>
                 <div style={{ width:`${pct}%`, background:bc, borderRadius:4, height:6 }} />
@@ -445,7 +445,7 @@ function InventoryPage({ products, setProducts, dbFns }) {
   const [adjustNote, setAdjustNote] = useState("");
   const [saving,     setSaving]     = useState(false);
 
-  const openAdd = () => { setForm({ id:genId("P"), name:"", unit:"박스", buyPrice:"", sellPrice:"", stock:"", taxType:"과세" }); setModal("add"); };
+  const openAdd = () => { setForm({ id:genId("P"), name:"", unit:"개", buyPrice:"", sellPrice:"", stock:"", taxType:"과세" }); setModal("add"); };
 
   const saveProduct = async () => {
     setSaving(true);
@@ -520,7 +520,7 @@ function InventoryPage({ products, setProducts, dbFns }) {
               <Input label="매입단가(원)" type="number" value={form.buyPrice}  onChange={e=>setForm({...form,buyPrice:e.target.value})} />
               <Input label="매출단가(원)" type="number" value={form.sellPrice} onChange={e=>setForm({...form,sellPrice:e.target.value})} />
             </div>
-            {modal==="add" && <Input label="초기 재고(박스)" type="number" value={form.stock} onChange={e=>setForm({...form,stock:e.target.value})} />}
+            {modal==="add" && <Input label="초기 재고(개)" type="number" value={form.stock} onChange={e=>setForm({...form,stock:e.target.value})} />}
             <div style={{ display:"flex", gap:8, justifyContent:"flex-end", marginTop:8 }}>
               <Btn variant="ghost" onClick={()=>setModal(null)}>취소</Btn>
               <Btn onClick={saveProduct} style={{ opacity:saving?0.6:1 }}>{saving?"저장 중...":"저장"}</Btn>
@@ -531,9 +531,9 @@ function InventoryPage({ products, setProducts, dbFns }) {
       {modal==="adjust" && (
         <Modal title={`재고 조정 - ${form.name}`} onClose={()=>setModal(null)}>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            <div style={{ color:COLORS.textDim, fontSize:13 }}>현재 재고: <strong style={{ color:COLORS.text }}>{form.stock}박스</strong></div>
+            <div style={{ color:COLORS.textDim, fontSize:13 }}>현재 재고: <strong style={{ color:COLORS.text }}>{form.stock}개</strong></div>
             <Input label="조정 수량 (입고:양수, 출고:음수)" type="number" value={adjustQty} onChange={e=>setAdjustQty(e.target.value)} />
-            <div style={{ color:COLORS.textDim, fontSize:13 }}>조정 후: <strong style={{ color:COLORS.accent }}>{Math.max(0,form.stock+(+adjustQty))}박스</strong></div>
+            <div style={{ color:COLORS.textDim, fontSize:13 }}>조정 후: <strong style={{ color:COLORS.accent }}>{Math.max(0,form.stock+(+adjustQty))}개</strong></div>
             <Input label="사유" value={adjustNote} onChange={e=>setAdjustNote(e.target.value)} placeholder="예: 재고실사, 파손폐기, 수입입고 등" />
             <div style={{ display:"flex", gap:8, justifyContent:"flex-end", marginTop:8 }}>
               <Btn variant="ghost" onClick={()=>setModal(null)}>취소</Btn>
@@ -1034,7 +1034,7 @@ function SalesPage({ orders, products, wholesalePartners, retailPartners }) {
         <div style={{ color:COLORS.textDim, fontSize:12, fontWeight:700, marginBottom:16 }}>📊 상품별 판매 실적</div>
         <Table cols={[
           { key:"name",    label:"상품명" },
-          { key:"sold",    label:"판매량",  align:"right", render:r=>`${fmt(r.sold)}박스` },
+          { key:"sold",    label:"판매량",  align:"right", render:r=>`${fmt(r.sold)}개` },
           { key:"revenue", label:"매출액",  align:"right", render:r=><span style={{ color:COLORS.green }}>₩{fmt(r.revenue)}</span> },
           { key:"cost",    label:"매입원가",align:"right", render:r=><span style={{ color:COLORS.textMuted }}>₩{fmt(r.cost)}</span> },
           { key:"profit",  label:"이익",    align:"right", render:r=><span style={{ color:r.profit>0?COLORS.accent:COLORS.red, fontWeight:700 }}>₩{fmt(r.profit)}</span> },
