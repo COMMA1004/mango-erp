@@ -249,7 +249,7 @@ export default function App() {
 
   const saveInvoice = async (inv) => {
     const row = { id:inv.id, date:inv.date, type:inv.type, partner:inv.partner, amount:inv.amount, tax:inv.tax, total:inv.total, status:inv.status, note:inv.note||"", commission_ym:inv.commissionYM||"", comm_method:inv.commMethod||"", withhold:inv.withhold||0 };
-    const { error } = await supabase.from("invoices").insert(row);
+    const { error } = await supabase.from("invoices").upsert(row, { onConflict:"id" });
     if (error) alert("계산서 저장 실패: " + error.message);
   };
 
@@ -947,17 +947,6 @@ function InvoicesPage({ invoices, setInvoices, dbFns }) {
     setForm({ date:today(), type:"매출", partner:"", amount:"", note:"" });
   };
 
-  const saveEdit = async () => {
-    if (!editTarget) return;
-    setSaving(true);
-    const amount = +form.amount;
-    const tax    = editTarget.type==="매출" ? Math.round(amount*0.1) : 0;
-    const inv = { ...editTarget, date:form.date, partner:form.partner, amount, tax, total:amount+tax, note:form.note||"" };
-    await dbFns.saveInvoice(inv);
-    setSaving(false); setEditTarget(null);
-    setForm({ date:today(), type:"매출", partner:"", amount:"", note:"" });
-  };
-
   const toggleStatus = async (id, current) => {
     const next = current==="미수금"?"완료":"미수금";
     await dbFns.updateInvoiceStatus(id, next);
@@ -1005,31 +994,6 @@ function InvoicesPage({ invoices, setInvoices, dbFns }) {
         ]} rows={filtered} />
       </Card>
       {/* 수정 모달 */}
-      {editTarget && (
-        <Modal title="세금계산서 수정" onClose={()=>setEditTarget(null)}>
-          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            <div style={{ background:COLORS.bg, borderRadius:8, padding:10, fontSize:12, color:COLORS.textMuted }}>
-              <span style={{ color:COLORS.accent, fontWeight:700 }}>{editTarget.type}</span> | {editTarget.id}
-            </div>
-            <Input label="일자" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-            <Input label="거래처" value={form.partner} onChange={e=>setForm({...form,partner:e.target.value})} />
-            <Input label={editTarget.type==="매출"?"공급가액(원)":"매입금액(원)"} type="number"
-              value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} />
-            {editTarget.type==="매출" && (
-              <div style={{ background:COLORS.bg, borderRadius:8, padding:10, fontSize:12, color:COLORS.textMuted }}>
-                세액(10%): ₩{fmt(Math.round((+form.amount||0)*0.1))} &nbsp;|&nbsp;
-                합계: ₩{fmt(Math.round((+form.amount||0)*1.1))}
-              </div>
-            )}
-            <Input label="비고" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
-            <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
-              <Btn variant="ghost" onClick={()=>setEditTarget(null)}>취소</Btn>
-              <Btn onClick={saveEdit} style={{ opacity:saving?0.6:1 }}>{saving?"저장 중...":"수정 저장"}</Btn>
-            </div>
-          </div>
-        </Modal>
-      )}
-
       {editTarget && (
         <Modal title="세금계산서 수정" onClose={()=>setEditTarget(null)}>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
