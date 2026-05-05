@@ -1047,6 +1047,19 @@ function SalesPage({ orders, products, wholesalePartners, retailPartners }) {
   );
 }
 
+// 상품 자동 매칭 함수 - 키워드 기반
+function matchProduct(platformName, products) {
+  if (!platformName) return null;
+  const name = platformName.toLowerCase().replace(/\s+/g,"").replace(/-/g,"");
+  const nameKws = name.match(/[가-힣]+|[a-z0-9]+/g) || [];
+  // ERP 상품 키워드와 1개 이상 일치하면 매칭
+  return products.find(p => {
+    const erpKws = p.name.toLowerCase().replace(/\s+/g,"").replace(/-/g,"").match(/[가-힣]+|[a-z0-9]+/g) || [];
+    const matchCount = erpKws.filter(ew => ew.length >= 2 && nameKws.some(nw => ew.includes(nw) || nw.includes(ew))).length;
+    return matchCount >= 1;
+  }) || null;
+}
+
 function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
   const [channel,      setChannel]      = useState("쿠팡");
   const [step,         setStep]         = useState(1);
@@ -1102,7 +1115,7 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
         const amount    = parseInt(String(row["결제액"]||"0").replace(/,/g,""))||0;
         const unitPrice = parseInt(String(row["옵션판매가(판매단가)"]||"0").replace(/,/g,""))||0;
         const isDup     = existing.has(orderId);
-        const matched   = products.find(p => prodName.includes(p.name.slice(0,4))||p.name.includes(prodName.slice(0,4)));
+        const matched   = matchProduct(prodName, products);
         return { orderId, date, productName:prodName, option, qty, amount, unitPrice, matchedProductId:matched?.id||"", isDuplicate:isDup, skip:isDup };
       });
       setMapped(mappedRows); setStep(2);
@@ -1162,7 +1175,7 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
       const date     = settle ? String(settle["결제일"]||rawDate).replace(/\./g,"-").slice(0,10) : rawDate;
       const unitPrice = qty > 0 ? Math.round(amount/qty) : 0;
       const isDup    = existing.has(orderId);
-      const matched  = products.find(p => prodName.includes(p.name.slice(0,4))||p.name.includes(prodName.slice(0,4)));
+      const matched  = matchProduct(prodName, products);
       const isCancelled = row["클레임상태"] === "취소완료";
       return { orderId, date, productName:prodName, option, qty, amount, unitPrice, matchedProductId:matched?.id||"", isDuplicate:isDup, skip:isDup||isCancelled, isCancelled, noSettle: !settle };
     });
