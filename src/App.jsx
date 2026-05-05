@@ -562,20 +562,21 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
   const [saving,          setSaving]          = useState(false);
   const [dateFrom,        setDateFrom]        = useState("");
   const [dateTo,          setDateTo]          = useState("");
-  const [form, setForm] = useState({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1}], note:"" });
+  const [form, setForm] = useState({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1,price:""}], note:"" });
 
   const allPartners = form.type==="도매" ? wholesalePartners : retailPartners;
-  const calcTotal   = items => items.reduce((s,it)=>{ const p=products.find(x=>x.id===it.productId); return s+(p?p.sellPrice*it.qty:0); },0);
+  const calcTotal   = items => items.reduce((s,it)=>{ const price=it.price!==""&&it.price!==undefined?+it.price:0; return s+(price*+it.qty); },0);
 
   const submit = async () => {
     const partner = allPartners.find(p=>p.id===form.partnerId);
     if (!partner || form.items.some(it=>!it.productId)) return alert("거래처와 상품을 모두 선택하세요.");
+    if (form.items.some(it=>!it.price||+it.price===0)) return alert("단가를 입력하세요.");
     setSaving(true);
     const total = calcTotal(form.items);
-    const newOrder = { id:genId("ORD"), date:form.date, type:form.type, partner:partner.name, partnerId:form.partnerId, channel:"", platformOrderId:"", items:form.items.map(it=>({...it,qty:+it.qty,price:products.find(p=>p.id===it.productId)?.sellPrice||0})), status:"대기", total, note:form.note||"" };
+    const newOrder = { id:genId("ORD"), date:form.date, type:form.type, partner:partner.name, partnerId:form.partnerId, channel:"", platformOrderId:"", items:form.items.map(it=>({...it,qty:+it.qty,price:+it.price})), status:"대기", total, note:form.note||"" };
     await dbFns.saveOrder(newOrder);
     setSaving(false); setModal(false);
-    setForm({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1}], note:"" });
+    setForm({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1,price:""}], note:"" });
   };
 
   const processOrder = async (orderId) => {
@@ -703,12 +704,56 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
           { key:"total",   label:"출고금액", align:"right", render:r=>`₩${fmt(r.total)}` },
           { key:"status",  label:"상태",   render:r=><Badge label={r.status} color={r.status==="출고완료"?COLORS.green:COLORS.accent}/> },
           { key:"actions", label:"", render:r=>(
-            <div style={{ display:"flex", gap:6 }}>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
               {r.status==="대기" && <Btn variant="success" style={{ padding:"4px 10px", fontSize:12 }} onClick={()=>processOrder(r.id)}>출고처리</Btn>}
+              <Btn variant="ghost" style={{ padding:"4px 10px", fontSize:12 }} onClick={()=>setStatementOrder(r)}>📄 명세서</Btn>
+              <Btn variant="danger" style={{ padding:"4px 8px", fontSize:12 }} onClick={()=>setDeleteTarget(r)}>🗑️</Btn>
             </div>
           )},
         ]} rows={filtered} />
       </Card>
+
+      {/* 거래명세서 */}
+      {statementOrder && (
+        <DeliveryStatement
+          order={statementOrder}
+          products={products}
+          wholesalePartners={wholesalePartners}
+          retailPartners={retailPartners}
+          onClose={()=>setStatementOrder(null)}
+        />
+      )}
+
+      {/* 삭제 확인 모달 */}
+      {deleteTarget && (
+        <Modal title="출고 삭제 확인" onClose={()=>setDeleteTarget(null)}>
+          <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+            <div style={{ background:COLORS.bg, borderRadius:10, padding:16 }}>
+              <div style={{ color:COLORS.textMuted, fontSize:12, marginBottom:8 }}>삭제할 출고 정보</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:6, fontSize:13 }}>
+                {[["주문번호",deleteTarget.id],["일자",deleteTarget.date],["거래처",deleteTarget.partner],["출고금액",`₩${fmt(deleteTarget.total)}`],["상태",deleteTarget.status]].map(([k,v])=>(
+                  <div key={k} style={{ display:"flex", justifyContent:"space-between" }}>
+                    <span style={{ color:COLORS.textMuted }}>{k}</span>
+                    <span style={{ color:COLORS.text, fontWeight:600 }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {deleteTarget.status==="출고완료" && (
+              <div style={{ background:COLORS.red+"11", border:`1px solid ${COLORS.red}44`, borderRadius:8, padding:12, fontSize:12, color:COLORS.red }}>
+                ⚠️ 이미 출고완료된 건입니다. 삭제해도 재고는 자동 복구되지 않습니다.
+              </div>
+            )}
+            <div style={{ background:COLORS.red+"11", border:`1px solid ${COLORS.red}44`, borderRadius:8, padding:12, fontSize:12, color:COLORS.red }}>
+              🗑️ 삭제하면 복구할 수 없습니다. 정말 삭제하시겠습니까?
+            </div>
+            <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setDeleteTarget(null)}>취소</Btn>
+              <Btn variant="danger" onClick={async()=>{ await dbFns.deleteOrder(deleteTarget.id); setDeleteTarget(null); }}>삭제 확인</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {commissionModal && (
         <Modal title="영업대행수수료 안내" onClose={()=>setCommissionModal(null)}>
@@ -753,17 +798,26 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
             </Select>
             <div>
               <div style={{ color:COLORS.textDim, fontSize:12, fontWeight:700, marginBottom:8 }}>출고 품목</div>
+              {/* 헤더 */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 80px 110px auto", gap:8, marginBottom:4 }}>
+                <div style={{ color:COLORS.textMuted, fontSize:11 }}>상품명</div>
+                <div style={{ color:COLORS.textMuted, fontSize:11 }}>수량</div>
+                <div style={{ color:COLORS.textMuted, fontSize:11 }}>단가(원) ✏️</div>
+                <div></div>
+              </div>
               {form.items.map((it,i)=>(
-                <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 100px auto", gap:8, marginBottom:8, alignItems:"center" }}>
+                <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 80px 110px auto", gap:8, marginBottom:8, alignItems:"center" }}>
                   <Select value={it.productId} onChange={e=>setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,productId:e.target.value}:x)})}>
                     <option value="">-- 상품 선택 --</option>
                     {products.map(p=><option key={p.id} value={p.id}>{p.name} (재고:{p.stock})</option>)}
                   </Select>
                   <Input type="number" placeholder="수량" value={it.qty} onChange={e=>setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,qty:e.target.value}:x)})} />
+                  <Input type="number" placeholder="단가 입력" value={it.price||""} onChange={e=>setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,price:e.target.value}:x)})}
+                    style={{ border:`1px solid ${COLORS.accent}66` }} />
                   <button onClick={()=>setForm({...form,items:form.items.filter((_,idx)=>idx!==i)})} style={{ background:"none", border:"none", color:COLORS.red, cursor:"pointer", fontSize:16 }}>×</button>
                 </div>
               ))}
-              <Btn variant="ghost" onClick={()=>setForm({...form,items:[...form.items,{productId:"",qty:1}]})} style={{ fontSize:12 }}>+ 품목 추가</Btn>
+              <Btn variant="ghost" onClick={()=>setForm({...form,items:[...form.items,{productId:"",qty:1,price:""}]})} style={{ fontSize:12 }}>+ 품목 추가</Btn>
             </div>
             <div style={{ background:COLORS.bg, borderRadius:8, padding:12 }}>
               <div style={{ display:"flex", justifyContent:"space-between" }}>
@@ -1171,6 +1225,112 @@ function matchProduct(platformName, products) {
     const matchCount = erpKws.filter(ew => ew.length >= 2 && nameKws.some(nw => ew.includes(nw) || nw.includes(ew))).length;
     return matchCount >= 1;
   }) || null;
+}
+
+// ─── 거래명세서 ──────────────────────────────────────────────────────────────
+function DeliveryStatement({ order, products, wholesalePartners, retailPartners, onClose }) {
+  const partner = [...wholesalePartners, ...retailPartners].find(p=>p.id===order.partnerId)||{};
+  const isWholesale = wholesalePartners.find(p=>p.id===order.partnerId);
+  const itemsWithTax = order.items.map(it=>{
+    const prod = products.find(p=>p.id===it.productId);
+    const isTaxable = (prod?.taxType||"과세")==="과세";
+    const rowSupply = it.price * it.qty;
+    const rowTax = isTaxable ? Math.round(rowSupply*0.1) : 0;
+    return { ...it, prod, isTaxable, rowSupply, rowTax };
+  });
+  const supply = itemsWithTax.reduce((s,it)=>s+it.rowSupply,0);
+  const tax    = itemsWithTax.reduce((s,it)=>s+it.rowTax,0);
+  const total  = supply+tax;
+  const printStyle = `@media print { body * { visibility:hidden; } #settle-print, #settle-print * { visibility:visible; } #settle-print { position:fixed; left:0; top:0; width:100%; } .no-print { display:none !important; } }`;
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"#000c", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={onClose}>
+      <style>{printStyle}</style>
+      <div id="settle-print" style={{ background:"#fff", borderRadius:12, padding:40, width:740, maxHeight:"92vh", overflowY:"auto", color:"#111", fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif" }} onClick={e=>e.stopPropagation()}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:24, paddingBottom:16, borderBottom:"3px solid #f59e0b" }}>
+          <div>
+            <div style={{ fontSize:26, fontWeight:900, letterSpacing:-1 }}>거 래 명 세 서</div>
+            <div style={{ fontSize:12, color:"#666", marginTop:4 }}>DELIVERY STATEMENT</div>
+          </div>
+          <div style={{ textAlign:"right" }}>
+            <div style={{ fontSize:12, color:"#888" }}>발행일자</div>
+            <div style={{ fontSize:14, fontWeight:700 }}>{order.date}</div>
+          </div>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:20 }}>
+          {[
+            { label:"공 급 자", color:"#f59e0b", rows:[["상 호","주식회사 콤마"],["대 표 자","임성근"],["사업자번호","855-88-01315"],["업 태","도소매"],["종 목","수입식품 수입판매업 외"],["주 소","경기도 안양시 동안구 엘에스로 136, 1603호"]] },
+            { label:"공급받는자", color:"#22d3ee", rows:[["상 호",partner.name||"-"],["대 표 자",partner.ceo||"-"],["사업자번호",partner.bizNo||"-"],["주 소",partner.addr||"-"],["연 락 처",partner.tel||"-"],["유 형",isWholesale?"도매":"온라인소매"]] },
+          ].map(sec=>(
+            <div key={sec.label} style={{ border:"1px solid #ddd", borderRadius:8, padding:14 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:sec.color, marginBottom:8 }}>{sec.label}</div>
+              <table style={{ width:"100%", fontSize:12, borderCollapse:"collapse" }}>
+                {sec.rows.map(([k,v])=>(
+                  <tr key={k}><td style={{ color:"#888", padding:"3px 0", width:70, fontSize:11 }}>{k}</td><td style={{ color:"#111", fontWeight:600, padding:"3px 0" }}>{v}</td></tr>
+                ))}
+              </table>
+            </div>
+          ))}
+        </div>
+        <table style={{ width:"100%", borderCollapse:"collapse", marginBottom:16, fontSize:13 }}>
+          <thead>
+            <tr style={{ background:"#f8f8f8", borderTop:"2px solid #333", borderBottom:"1px solid #ccc" }}>
+              {["No","품 목 명","규격","수량","단가","공급가액","세액(10%)","합계"].map(h=>(
+                <th key={h} style={{ padding:"9px 8px", textAlign:"center", fontWeight:700, fontSize:12, color:"#333" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {itemsWithTax.map((it,i)=>(
+              <tr key={i} style={{ borderBottom:"1px solid #eee" }}>
+                <td style={{ padding:"8px", textAlign:"center", color:"#666" }}>{i+1}</td>
+                <td style={{ padding:"8px" }}>{it.prod?.name||it.productId}{!it.isTaxable&&<span style={{ marginLeft:4, fontSize:10, background:"#e0f7fa", color:"#0097a7", borderRadius:3, padding:"1px 4px" }}>면세</span>}</td>
+                <td style={{ padding:"8px", textAlign:"center", color:"#666" }}>{it.prod?.unit||"개"}</td>
+                <td style={{ padding:"8px", textAlign:"right", fontWeight:700 }}>{fmt(it.qty)}</td>
+                <td style={{ padding:"8px", textAlign:"right" }}>₩{fmt(it.price)}</td>
+                <td style={{ padding:"8px", textAlign:"right" }}>₩{fmt(it.rowSupply)}</td>
+                <td style={{ padding:"8px", textAlign:"right", color:it.isTaxable?"#888":"#bbb" }}>{it.isTaxable?`₩${fmt(it.rowTax)}`:"면세"}</td>
+                <td style={{ padding:"8px", textAlign:"right", fontWeight:700 }}>₩{fmt(it.rowSupply+it.rowTax)}</td>
+              </tr>
+            ))}
+            {Array.from({length:Math.max(0,5-itemsWithTax.length)}).map((_,i)=>(
+              <tr key={`e${i}`} style={{ borderBottom:"1px solid #eee" }}>{[...Array(8)].map((_,j)=><td key={j} style={{ padding:"8px", height:32 }}>&nbsp;</td>)}</tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr style={{ background:"#fffbeb", borderTop:"2px solid #f59e0b" }}>
+              <td colSpan={5} style={{ padding:"10px 8px", fontWeight:700, textAlign:"right" }}>합 계</td>
+              <td style={{ padding:"10px 8px", textAlign:"right", fontWeight:800 }}>₩{fmt(supply)}</td>
+              <td style={{ padding:"10px 8px", textAlign:"right", fontWeight:800 }}>₩{fmt(tax)}</td>
+              <td style={{ padding:"10px 8px", textAlign:"right", fontWeight:900, color:"#f59e0b", fontSize:15 }}>₩{fmt(total)}</td>
+            </tr>
+          </tfoot>
+        </table>
+        <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:20 }}>
+          <div style={{ border:"2px solid #f59e0b", borderRadius:8, padding:"12px 20px", minWidth:280 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"3px 0" }}><span style={{ color:"#888" }}>공급가액</span><span style={{ fontWeight:600 }}>₩{fmt(supply)}</span></div>
+            <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"3px 0" }}><span style={{ color:"#888" }}>부가세(10%)</span><span style={{ fontWeight:600 }}>₩{fmt(tax)}</span></div>
+            <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0 0", marginTop:6, borderTop:"1px solid #f59e0b", fontSize:16 }}>
+              <span style={{ fontWeight:800 }}>청구금액</span>
+              <span style={{ color:"#f59e0b", fontWeight:900 }}>₩{fmt(total)}</span>
+            </div>
+          </div>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:20 }}>
+          {["공급자 확인","공급받는자 확인"].map(label=>(
+            <div key={label} style={{ border:"1px solid #ddd", borderRadius:8, padding:"12px 16px", minHeight:60 }}>
+              <div style={{ fontSize:11, color:"#aaa", marginBottom:8 }}>{label}</div>
+              <div style={{ fontSize:12, color:"#ccc" }}>(서명 / 날인)</div>
+            </div>
+          ))}
+        </div>
+        <div className="no-print" style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+          <button onClick={onClose} style={{ padding:"10px 20px", borderRadius:8, border:"1px solid #ddd", background:"#f5f5f5", cursor:"pointer", fontSize:13 }}>닫기</button>
+          <button onClick={()=>window.print()} style={{ padding:"10px 24px", borderRadius:8, border:"none", background:"#f59e0b", color:"#000", fontWeight:700, cursor:"pointer", fontSize:13 }}>🖨️ 인쇄 / PDF</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── 도매정산마감 ────────────────────────────────────────────────────────────
