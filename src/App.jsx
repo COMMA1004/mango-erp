@@ -141,6 +141,7 @@ const TABS = [
   { key:"commission", label:"영업수수료", icon:"💸" },
   { key:"sales",      label:"매출분석",   icon:"📊" },
   { key:"online",     label:"온라인연동", icon:"🔗" },
+  { key:"settle",     label:"도매정산마감", icon:"🧾" },
 ];
 
 export default function App() {
@@ -362,6 +363,7 @@ function PageRouter({ tab, products, setProducts, orders, setOrders, invoices, s
     commission: <CommissionPage {...props} />,
     sales:      <SalesPage      {...props} />,
     online:     <OnlinePage     {...props} />,
+    settle:     <SettlePage     {...props} />,
   };
   return pages[tab] || null;
 }
@@ -1169,6 +1171,260 @@ function matchProduct(platformName, products) {
     const matchCount = erpKws.filter(ew => ew.length >= 2 && nameKws.some(nw => ew.includes(nw) || nw.includes(ew))).length;
     return matchCount >= 1;
   }) || null;
+}
+
+// ─── 도매정산마감 ────────────────────────────────────────────────────────────
+function SettlePage({ orders, wholesalePartners, products }) {
+  const nowYM = today().slice(0,7);
+  const [selectedYM,   setSelectedYM]   = useState(nowYM);
+  const [previewData,  setPreviewData]  = useState(null); // { partner, orders, ym }
+
+  const lastDay = (ym) => {
+    const [y,m] = ym.split("-").map(Number);
+    return new Date(y,m,0).getDate();
+  };
+  const closingDate = `${selectedYM}-${String(lastDay(selectedYM)).padStart(2,"0")}`;
+
+  // 해당 월 도매 출고 완료 건 거래처별 그룹
+  const monthOrders = orders.filter(o =>
+    o.type==="도매" && o.status==="출고완료" && o.date?.slice(0,7)===selectedYM
+  );
+  const byPartner = wholesalePartners.map(wp => {
+    const pOrders = monthOrders.filter(o=>o.partnerId===wp.id);
+    const total   = pOrders.reduce((s,o)=>s+o.total,0);
+    return { partner:wp, orders:pOrders, total };
+  }).filter(g=>g.orders.length>0);
+
+  const printStyle = `
+    @media print {
+      body * { visibility: hidden; }
+      #settle-print, #settle-print * { visibility: visible; }
+      #settle-print { position: fixed; left:0; top:0; width:100%; }
+      .no-print { display: none !important; }
+    }
+  `;
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
+      <style>{printStyle}</style>
+      <div>
+        <div style={{ color:COLORS.accent, fontSize:11, fontWeight:700, letterSpacing:2 }}>SETTLEMENT</div>
+        <h2 style={{ color:COLORS.text, fontSize:22, fontWeight:800, margin:0 }}>도매정산마감</h2>
+      </div>
+
+      {/* 월 선택 */}
+      <Card>
+        <div style={{ display:"flex", gap:12, alignItems:"flex-end" }}>
+          <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+            <label style={{ color:COLORS.textDim, fontSize:12, fontWeight:600 }}>정산 월</label>
+            <input type="month" value={selectedYM} onChange={e=>setSelectedYM(e.target.value)}
+              style={{ background:COLORS.bg, border:`1px solid ${COLORS.border}`, borderRadius:8, padding:"8px 12px", color:COLORS.text, fontSize:13 }} />
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+            <label style={{ color:COLORS.textDim, fontSize:12, fontWeight:600 }}>마감일</label>
+            <div style={{ background:COLORS.surfaceAlt, border:`1px solid ${COLORS.border}`, borderRadius:8, padding:"8px 14px", color:COLORS.accent, fontSize:13, fontWeight:700 }}>
+              {closingDate}
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* 거래처별 목록 */}
+      {byPartner.length===0 ? (
+        <Card>
+          <div style={{ textAlign:"center", padding:32, color:COLORS.textMuted }}>
+            {selectedYM} 도매 출고 내역이 없습니다.
+          </div>
+        </Card>
+      ) : (
+        <Card>
+          <div style={{ color:COLORS.textDim, fontSize:12, fontWeight:700, marginBottom:12 }}>
+            📋 {selectedYM} 도매 거래처별 정산 현황
+          </div>
+          {byPartner.map(g=>(
+            <div key={g.partner.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:`1px solid ${COLORS.border}22` }}>
+              <div>
+                <div style={{ color:COLORS.text, fontWeight:700, fontSize:14 }}>{g.partner.name}</div>
+                <div style={{ color:COLORS.textMuted, fontSize:12, marginTop:2 }}>{g.orders.length}건 출고</div>
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ color:COLORS.accent, fontWeight:800, fontSize:16 }}>₩{fmt(g.total)}</div>
+                  <div style={{ color:COLORS.textMuted, fontSize:11 }}>합계</div>
+                </div>
+                <Btn onClick={()=>setPreviewData({ partner:g.partner, orders:g.orders, total:g.total, ym:selectedYM, closingDate })}>
+                  🧾 정산서 발행
+                </Btn>
+              </div>
+            </div>
+          ))}
+          <div style={{ display:"flex", justifyContent:"space-between", marginTop:16, paddingTop:12, borderTop:`2px solid ${COLORS.border}` }}>
+            <span style={{ color:COLORS.textDim, fontWeight:700 }}>총 합계</span>
+            <span style={{ color:COLORS.accent, fontWeight:900, fontSize:18 }}>₩{fmt(byPartner.reduce((s,g)=>s+g.total,0))}</span>
+          </div>
+        </Card>
+      )}
+
+      {/* 정산서 미리보기/인쇄 모달 */}
+      {previewData && (
+        <SettleStatement
+          data={previewData}
+          products={products}
+          onClose={()=>setPreviewData(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// 정산서 컴포넌트
+function SettleStatement({ data, products, onClose }) {
+  const { partner, orders, total, ym, closingDate } = data;
+  const [y, m] = ym.split("-");
+  const startDate = `${ym}-01`;
+  const periodStr = `${y}년 ${parseInt(m)}월 1일 ~ ${closingDate.slice(5).replace("-","월 ")}일`;
+
+  // 출고 상세 행 (일자별 품목별로 펼치기)
+  const rows = [];
+  orders.slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach(o=>{
+    o.items.forEach(it=>{
+      const prod = products.find(p=>p.id===it.productId);
+      rows.push({
+        date:   o.date,
+        name:   prod?.name || it.productId,
+        qty:    it.qty,
+        price:  it.price || 0,
+        amount: it.qty * (it.price||0) || o.total,
+      });
+    });
+    // items가 비어있으면 note에서 표시
+    if (o.items.length===0) {
+      rows.push({ date:o.date, name:o.note||"-", qty:"-", price:"-", amount:o.total });
+    }
+  });
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"#000c", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={onClose}>
+      <div id="settle-print" style={{ background:"#fff", borderRadius:12, padding:40, width:740, maxHeight:"92vh", overflowY:"auto", color:"#111", fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif" }} onClick={e=>e.stopPropagation()}>
+
+        {/* 제목 */}
+        <div style={{ textAlign:"center", marginBottom:24, paddingBottom:16, borderBottom:"3px solid #f59e0b" }}>
+          <div style={{ fontSize:28, fontWeight:900, letterSpacing:2 }}>정 산 서</div>
+          <div style={{ fontSize:12, color:"#888", marginTop:4 }}>SETTLEMENT STATEMENT</div>
+        </div>
+
+        {/* 공급자 / 공급받는자 */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:20 }}>
+          <div style={{ border:"1px solid #ddd", borderRadius:8, padding:14 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:"#f59e0b", marginBottom:8, letterSpacing:1 }}>공 급 자</div>
+            <table style={{ width:"100%", fontSize:12, borderCollapse:"collapse" }}>
+              {[
+                ["상 호", "주식회사 콤마"],
+                ["대 표 자", "임성근"],
+                ["사업자번호", "855-88-01315"],
+                ["업 태", "도소매"],
+                ["종 목", "수입식품 수입판매업 외"],
+                ["주 소", "경기도 안양시 동안구 엘에스로 136, 1603호"],
+                ["연 락 처", ""],
+              ].map(([k,v])=>(
+                <tr key={k}>
+                  <td style={{ color:"#888", padding:"3px 0", width:70, fontSize:11 }}>{k}</td>
+                  <td style={{ color:"#111", fontWeight:600, padding:"3px 0" }}>{v}</td>
+                </tr>
+              ))}
+            </table>
+          </div>
+          <div style={{ border:"1px solid #ddd", borderRadius:8, padding:14 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:"#22d3ee", marginBottom:8, letterSpacing:1 }}>공급받는자</div>
+            <table style={{ width:"100%", fontSize:12, borderCollapse:"collapse" }}>
+              {[
+                ["상 호", partner.name],
+                ["대 표 자", partner.ceo||"-"],
+                ["사업자번호", partner.bizNo||"-"],
+                ["주 소", partner.addr||"-"],
+                ["연 락 처", partner.tel||"-"],
+                ["정산기간", periodStr],
+              ].map(([k,v])=>(
+                <tr key={k}>
+                  <td style={{ color:"#888", padding:"3px 0", width:70, fontSize:11 }}>{k}</td>
+                  <td style={{ color:"#111", fontWeight:600, padding:"3px 0" }}>{v}</td>
+                </tr>
+              ))}
+            </table>
+          </div>
+        </div>
+
+        {/* 품목 테이블 */}
+        <table style={{ width:"100%", borderCollapse:"collapse", marginBottom:16, fontSize:13 }}>
+          <thead>
+            <tr style={{ background:"#f8f8f8", borderTop:"2px solid #333", borderBottom:"1px solid #ccc" }}>
+              {["No","일자","품 목 명","수량","판매단가","금액"].map(h=>(
+                <th key={h} style={{ padding:"9px 8px", textAlign:"center", fontWeight:700, fontSize:12, color:"#333" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r,i)=>(
+              <tr key={i} style={{ borderBottom:"1px solid #eee" }}>
+                <td style={{ padding:"8px", textAlign:"center", color:"#666" }}>{i+1}</td>
+                <td style={{ padding:"8px", textAlign:"center" }}>{r.date}</td>
+                <td style={{ padding:"8px" }}>{r.name}</td>
+                <td style={{ padding:"8px", textAlign:"right" }}>{typeof r.qty==="number"?fmt(r.qty):r.qty}</td>
+                <td style={{ padding:"8px", textAlign:"right" }}>{typeof r.price==="number"?`₩${fmt(r.price)}`:r.price}</td>
+                <td style={{ padding:"8px", textAlign:"right", fontWeight:700 }}>{typeof r.amount==="number"?`₩${fmt(r.amount)}`:r.amount}</td>
+              </tr>
+            ))}
+            {/* 빈 행 채우기 */}
+            {Array.from({ length: Math.max(0, 5-rows.length) }).map((_,i)=>(
+              <tr key={`e${i}`} style={{ borderBottom:"1px solid #eee" }}>
+                {[...Array(6)].map((_,j)=><td key={j} style={{ padding:"8px", height:32 }}>&nbsp;</td>)}
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr style={{ background:"#fffbeb", borderTop:"2px solid #f59e0b" }}>
+              <td colSpan={5} style={{ padding:"10px 8px", fontWeight:700, textAlign:"right", fontSize:13 }}>합 계</td>
+              <td style={{ padding:"10px 8px", textAlign:"right", fontWeight:900, color:"#f59e0b", fontSize:15 }}>₩{fmt(total)}</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        {/* 금액 요약 */}
+        <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:20 }}>
+          <div style={{ border:"2px solid #f59e0b", borderRadius:8, padding:"12px 20px", minWidth:300 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", padding:"4px 0", fontSize:13 }}>
+              <span style={{ color:"#888" }}>공급가액 (면세)</span>
+              <span style={{ color:"#333", fontWeight:600 }}>₩{fmt(total)}</span>
+            </div>
+            <div style={{ display:"flex", justifyContent:"space-between", padding:"4px 0", fontSize:13 }}>
+              <span style={{ color:"#888" }}>부가세</span>
+              <span style={{ color:"#bbb" }}>&nbsp;</span>
+            </div>
+            <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0 0", marginTop:6, borderTop:"1px solid #f59e0b", fontSize:16 }}>
+              <span style={{ fontWeight:800 }}>청구금액</span>
+              <span style={{ color:"#f59e0b", fontWeight:900 }}>₩{fmt(total)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 서명란 */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:20 }}>
+          {["공급자 확인","공급받는자 확인"].map(label=>(
+            <div key={label} style={{ border:"1px solid #ddd", borderRadius:8, padding:"12px 16px", minHeight:60 }}>
+              <div style={{ fontSize:11, color:"#aaa", marginBottom:8 }}>{label}</div>
+              <div style={{ fontSize:12, color:"#ccc" }}>(서명 / 날인)</div>
+            </div>
+          ))}
+        </div>
+
+        {/* 버튼 */}
+        <div className="no-print" style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+          <button onClick={onClose} style={{ padding:"10px 20px", borderRadius:8, border:"1px solid #ddd", background:"#f5f5f5", cursor:"pointer", fontSize:13 }}>닫기</button>
+          <button onClick={()=>window.print()} style={{ padding:"10px 24px", borderRadius:8, border:"none", background:"#f59e0b", color:"#000", fontWeight:700, cursor:"pointer", fontSize:13 }}>🖨️ 인쇄 / PDF</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
