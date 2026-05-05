@@ -1025,6 +1025,39 @@ function InvoicesPage({ invoices, setInvoices, dbFns }) {
 function CommissionPage({ orders, wholesalePartners, products, invoices, setInvoices, dbFns }) {
   const nowYM = today().slice(0,7);
   const [selectedYM, setSelectedYM] = useState(nowYM);
+  const [manualModal, setManualModal] = useState(false);
+  const [manualForm,  setManualForm]  = useState({ ym:nowYM, partnerId:"", amount:"", note:"" });
+  const [savingManual, setSavingManual] = useState(false);
+
+  // 수동 영업수수료 저장 (invoices 테이블에 type="매입", note에 "수동영업수수료" 태그)
+  const saveManualComm = async () => {
+    if (!manualForm.partnerId || !manualForm.amount) return alert("거래처와 금액을 입력하세요.");
+    setSavingManual(true);
+    const partner = wholesalePartners.find(p=>p.id===manualForm.partnerId);
+    const amount  = +manualForm.amount;
+    const inv = {
+      id: genId("COMM"),
+      date: `${manualForm.ym}-01`,
+      type: "매입",
+      partner: partner?.name||"-",
+      amount,
+      tax: 0,
+      total: amount,
+      status: "완료",
+      note: `수동영업수수료 | ${manualForm.ym} | ${manualForm.note||""}`,
+      commissionYM: manualForm.ym,
+      commMethod: "수동입력",
+      withhold: 0,
+    };
+    await dbFns.saveInvoice(inv);
+    setSavingManual(false);
+    setManualModal(false);
+    setManualForm({ ym:nowYM, partnerId:"", amount:"", note:"" });
+  };
+
+  // 수동 영업수수료 목록 (invoices에서 "수동영업수수료" 태그로 필터)
+  const manualCommList = (invoices||[]).filter(inv=>inv.note?.includes("수동영업수수료"));
+
   const [previewModal, setPreviewModal] = useState(false);
   const [resultModal,  setResultModal]  = useState(null);
   const [saving, setSaving] = useState(false);
@@ -1084,6 +1117,10 @@ function CommissionPage({ orders, wholesalePartners, products, invoices, setInvo
             <label style={{ color:COLORS.textDim, fontSize:11 }}>&nbsp;</label>
             <Btn onClick={()=>setPreviewModal(true)}>📋 {selectedYM} 수수료 일괄발행</Btn>
           </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
+            <label style={{ color:COLORS.textDim, fontSize:11 }}>&nbsp;</label>
+            <Btn variant="ghost" onClick={()=>setManualModal(true)}>✏️ 수동 수수료 입력</Btn>
+          </div>
         </div>
       </div>
       <Card>
@@ -1142,6 +1179,68 @@ function CommissionPage({ orders, wholesalePartners, products, invoices, setInvo
           </div>
         </Modal>
       )}
+      {/* 수동 영업수수료 목록 */}
+      {manualCommList.length > 0 && (
+        <Card>
+          <div style={{ color:COLORS.textDim, fontSize:12, fontWeight:700, marginBottom:12 }}>✏️ 수동 입력 영업수수료 내역</div>
+          <Table
+            cols={[
+              { key:"commissionYM", label:"대상 월", render:r=>r.note?.match(/[0-9]{4}-[0-9]{2}/)?.[0]||"-" },
+              { key:"partner",  label:"거래처" },
+              { key:"total",    label:"금액", align:"right", render:r=><span style={{ color:COLORS.red, fontWeight:700 }}>₩{fmt(r.total)}</span> },
+              { key:"note",     label:"비고", render:r=>{
+                const note = (r.note||"").replace("수동영업수수료 | ","").replace(/[0-9]{4}-[0-9]{2} \| ?/,"");
+                return <span style={{ color:COLORS.textMuted, fontSize:12 }}>{note||"-"}</span>;
+              }},
+              { key:"date", label:"입력일" },
+            ]}
+            rows={manualCommList}
+            emptyMsg="수동 입력 수수료 없음"
+          />
+          <div style={{ display:"flex", justifyContent:"space-between", marginTop:12, paddingTop:10, borderTop:`1px solid ${COLORS.border}` }}>
+            <span style={{ color:COLORS.textDim, fontWeight:700 }}>수동 수수료 합계</span>
+            <span style={{ color:COLORS.red, fontWeight:800, fontSize:16 }}>₩{fmt(manualCommList.reduce((s,r)=>s+r.total,0))}</span>
+          </div>
+        </Card>
+      )}
+
+      {/* 수동 수수료 입력 모달 */}
+      {manualModal && (
+        <Modal title="영업수수료 수동 입력" onClose={()=>setManualModal(false)}>
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            <div style={{ background:COLORS.bg, borderRadius:8, padding:12, fontSize:12, color:COLORS.textMuted }}>
+              💡 자동 계산 외 별도로 지급할 영업수수료를 입력합니다.<br/>
+              매출분석의 영업대행수수료에 자동 합산됩니다.
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+                <label style={{ color:COLORS.textDim, fontSize:12, fontWeight:600 }}>대상 월</label>
+                <input type="month" value={manualForm.ym} onChange={e=>setManualForm({...manualForm,ym:e.target.value})}
+                  style={{ background:COLORS.bg, border:`1px solid ${COLORS.border}`, borderRadius:8, padding:"8px 12px", color:COLORS.text, fontSize:13 }} />
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+                <label style={{ color:COLORS.textDim, fontSize:12, fontWeight:600 }}>거래처</label>
+                <select value={manualForm.partnerId} onChange={e=>setManualForm({...manualForm,partnerId:e.target.value})}
+                  style={{ background:COLORS.bg, border:`1px solid ${COLORS.border}`, borderRadius:8, padding:"8px 12px", color:COLORS.text, fontSize:13 }}>
+                  <option value="">-- 거래처 선택 --</option>
+                  {wholesalePartners.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+            </div>
+            <Input label="금액 (원)" type="number" placeholder="수수료 금액 입력"
+              value={manualForm.amount} onChange={e=>setManualForm({...manualForm,amount:e.target.value})} />
+            <Input label="비고" placeholder="예: 추가 판촉 활동, 특별 수수료 등"
+              value={manualForm.note} onChange={e=>setManualForm({...manualForm,note:e.target.value})} />
+            <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setManualModal(false)}>취소</Btn>
+              <Btn onClick={saveManualComm} style={{ opacity:savingManual?0.6:1 }}>
+                {savingManual?"저장 중...":"저장"}
+              </Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {resultModal && (
         <Modal title="발행 완료" onClose={()=>setResultModal(null)}>
           <div style={{ textAlign:"center", padding:16 }}>
@@ -1181,12 +1280,18 @@ function SalesPage({ orders, products, wholesalePartners, retailPartners, invoic
   const totalRevenue = completed.reduce((s,o)=>s+o.total,0);
   const totalCOGS    = productSales.reduce((s,p)=>s+p.cost,0);
 
-  // 영업수수료 (도매 출고 기준 자동계산)
-  const totalCommission = wholesale.reduce((s,o)=>{
+  // 영업수수료 (도매 출고 기준 자동계산 + 수동입력 합산)
+  const autoCommission = wholesale.reduce((s,o)=>{
     const partner  = wholesalePartners.find(p=>p.id===o.partnerId);
     const commInfo = getCommissionInfo(partner?.commissionType||"없음");
     return s + (commInfo.rate>0 ? Math.round(o.total*commInfo.rate) : 0);
   },0);
+  const manualCommission = (invoices||[]).filter(inv=>
+    inv.note?.includes("수동영업수수료") &&
+    (!dateFrom || inv.date>=dateFrom) &&
+    (!dateTo   || inv.date<=dateTo)
+  ).reduce((s,inv)=>s+inv.total,0);
+  const totalCommission = autoCommission + manualCommission;
 
   // 매입세금계산서 (기간 필터 적용)
   const totalPurchaseInvoice = (invoices||[]).filter(inv=>
@@ -1259,7 +1364,7 @@ function SalesPage({ orders, products, wholesalePartners, retailPartners, invoic
           <div style={{ padding:"10px 0 4px", color:COLORS.textMuted, fontSize:12, fontWeight:700 }}>(-) 매입원가 및 비용</div>
           {[
             { label:"① 상품원가 (매입단가 × 판매수량)", value:totalCOGS, color:COLORS.textDim },
-            { label:"② 영업대행수수료 (도매 출고 기준 자동계산)", value:totalCommission, color:COLORS.purple },
+            { label:`② 영업대행수수료 (자동 ₩${fmt(autoCommission)} + 수동 ₩${fmt(manualCommission)})`, value:totalCommission, color:COLORS.purple },
             { label:"③ 매입세금계산서 (기간 내 합계)", value:totalPurchaseInvoice, color:COLORS.cyan },
           ].map(item=>(
             <div key={item.label} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0 8px 16px", borderBottom:`1px dashed ${COLORS.border}` }}>
