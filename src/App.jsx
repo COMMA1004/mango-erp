@@ -625,7 +625,7 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
                 );
               })}
               {r.items.length===0 && r.note && (
-                <div style={{ fontSize:11, color:COLORS.textMuted }}>{r.note.replace(/.*\| /,"").slice(0,30)}</div>
+                <div style={{ fontSize:11, color:COLORS.textMuted }}>{r.note.slice(0,40)}</div>
               )}
             </div>
           )},
@@ -1234,7 +1234,7 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
       id:genId("ONL"), date:r.date, type:"온라인소매",
       partner:partnerName, partnerId, channel,
       platformOrderId:r.orderId,
-      items: r.matchedProductId ? [{ productId:r.matchedProductId, qty:r.qty, price:r.unitPrice }] : [],
+      items: r.matchedProductId ? [{ productId:r.matchedProductId, qty:r.actualQty||r.qty, price:r.unitPrice||Math.round(r.amount/(r.actualQty||r.qty)) }] : [],
       status:"출고완료",
       total:r.amount,
       note:`${channel} | ${r.productName}${r.option?" / "+r.option:""}`,
