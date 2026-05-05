@@ -612,7 +612,23 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
           { key:"date",    label:"일자" },
           { key:"type",    label:"유형",   render:r=><Badge label={r.type} color={r.type==="도매"?COLORS.purple:COLORS.cyan}/> },
           { key:"partner", label:"거래처" },
-          { key:"items",   label:"품목수", align:"center", render:r=>`${r.items.length}종` },
+          { key:"items", label:"출고 상품 / 수량", render:r=>(
+            <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
+              {r.items.map((it,i)=>{
+                const prod = products.find(p=>p.id===it.productId);
+                return (
+                  <div key={i} style={{ fontSize:12 }}>
+                    <span style={{ color:COLORS.textDim }}>{prod?.name||it.productId}</span>
+                    <span style={{ color:COLORS.text, fontWeight:700 }}> × {fmt(it.qty)}개</span>
+                    {it.price>0 && <span style={{ color:COLORS.textMuted }}> @ ₩{fmt(it.price)}</span>}
+                  </div>
+                );
+              })}
+              {r.items.length===0 && r.note && (
+                <div style={{ fontSize:11, color:COLORS.textMuted }}>{r.note.replace(/.*\| /,"").slice(0,30)}</div>
+              )}
+            </div>
+          )},
           { key:"total",   label:"출고금액", align:"right", render:r=>`₩${fmt(r.total)}` },
           { key:"status",  label:"상태",   render:r=><Badge label={r.status} color={r.status==="출고완료"?COLORS.green:COLORS.accent}/> },
           { key:"actions", label:"", render:r=>(
