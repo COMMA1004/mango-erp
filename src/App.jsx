@@ -947,6 +947,17 @@ function InvoicesPage({ invoices, setInvoices, dbFns }) {
     setForm({ date:today(), type:"매출", partner:"", amount:"", note:"" });
   };
 
+  const saveEdit = async () => {
+    if (!editTarget) return;
+    setSaving(true);
+    const amount = +form.amount;
+    const tax    = editTarget.type==="매출" ? Math.round(amount*0.1) : 0;
+    const inv = { ...editTarget, date:form.date, partner:form.partner, amount, tax, total:amount+tax, note:form.note||"" };
+    await dbFns.saveInvoice(inv);
+    setSaving(false); setEditTarget(null);
+    setForm({ date:today(), type:"매출", partner:"", amount:"", note:"" });
+  };
+
   const toggleStatus = async (id, current) => {
     const next = current==="미수금"?"완료":"미수금";
     await dbFns.updateInvoiceStatus(id, next);
@@ -985,9 +996,40 @@ function InvoicesPage({ invoices, setInvoices, dbFns }) {
           { key:"status",  label:"상태",      render:r=><Badge label={r.status} color={r.status==="완료"?COLORS.green:COLORS.red}/> },
           { key:"note",    label:"비고" },
           { key:"action",  label:"", render:r=>r.type==="매출"?(<Btn variant={r.status==="미수금"?"success":"ghost"} style={{ padding:"4px 10px", fontSize:11 }} onClick={()=>toggleStatus(r.id,r.status)}>{r.status==="미수금"?"수금처리":"미수금전환"}</Btn>):null },
+          { key:"edit", label:"", render:r=>(
+            <Btn variant="ghost" style={{ padding:"4px 8px", fontSize:11 }} onClick={()=>{
+              setEditTarget(r);
+              setForm({ date:r.date, type:r.type, partner:r.partner, amount:String(r.amount), note:r.note||"" });
+            }}>✏️ 수정</Btn>
+          )},
         ]} rows={filtered} />
       </Card>
       {/* 수정 모달 */}
+      {editTarget && (
+        <Modal title="세금계산서 수정" onClose={()=>setEditTarget(null)}>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <div style={{ background:COLORS.bg, borderRadius:8, padding:10, fontSize:12, color:COLORS.textMuted }}>
+              <span style={{ color:COLORS.accent, fontWeight:700 }}>{editTarget.type}</span> | {editTarget.id}
+            </div>
+            <Input label="일자" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+            <Input label="거래처" value={form.partner} onChange={e=>setForm({...form,partner:e.target.value})} />
+            <Input label={editTarget.type==="매출"?"공급가액(원)":"매입금액(원)"} type="number"
+              value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} />
+            {editTarget.type==="매출" && (
+              <div style={{ background:COLORS.bg, borderRadius:8, padding:10, fontSize:12, color:COLORS.textMuted }}>
+                세액(10%): ₩{fmt(Math.round((+form.amount||0)*0.1))} &nbsp;|&nbsp;
+                합계: ₩{fmt(Math.round((+form.amount||0)*1.1))}
+              </div>
+            )}
+            <Input label="비고" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
+            <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
+              <Btn variant="ghost" onClick={()=>setEditTarget(null)}>취소</Btn>
+              <Btn onClick={saveEdit} style={{ opacity:saving?0.6:1 }}>{saving?"저장 중...":"수정 저장"}</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {editTarget && (
         <Modal title="세금계산서 수정" onClose={()=>setEditTarget(null)}>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
