@@ -222,7 +222,7 @@ export default function App() {
 
   // ── DB 저장 헬퍼 함수들 ───────────────────────────────────────
   const saveProduct = async (prod, isNew) => {
-    const row = { id:prod.id, name:prod.name, unit:prod.unit, buy_price:prod.buyPrice, sell_price:0, stock:prod.stock, tax_type:prod.taxType };
+    const row = { id:prod.id, name:prod.name, unit:prod.unit, buy_price:prod.buyPrice, sell_price:prod.sellPrice, stock:prod.stock, tax_type:prod.taxType };
     const { error } = isNew ? await supabase.from("products").insert(row) : await supabase.from("products").update(row).eq("id", prod.id);
     if (error) alert("저장 실패: " + error.message);
   };
@@ -289,12 +289,7 @@ export default function App() {
     </div>
   );
 
-  const deleteOrder = async (id) => {
-    const { error } = await supabase.from("orders").delete().eq("id", id);
-    if (error) alert("삭제 실패: " + error.message);
-  };
-
-  const dbFns = { saveProduct, updateStock, saveOrder, updateOrderStatus, deleteOrder, saveInvoice, updateInvoiceStatus, saveWholesalePartner, updateWholesalePartner, saveRetailPartner };
+  const dbFns = { saveProduct, updateStock, saveOrder, updateOrderStatus, saveInvoice, updateInvoiceStatus, saveWholesalePartner, updateWholesalePartner, saveRetailPartner };
 
   return (
     <div style={{ display:"flex", height:"100vh", background:COLORS.bg, fontFamily:"'Pretendard','Apple SD Gothic Neo',sans-serif", color:COLORS.text }}>
@@ -450,12 +445,14 @@ function InventoryPage({ products, setProducts, dbFns }) {
   const [adjustNote, setAdjustNote] = useState("");
   const [saving,     setSaving]     = useState(false);
 
-  const openAdd = () => { setForm({ id:genId("P"), name:"", unit:"개", buyPrice:"", stock:"", taxType:"과세" }); setModal("add"); };
+  const openAdd = () => { setForm({ id:genId("P"), name:"", unit:"개", buyPrice:"", sellPrice:"", stock:"", taxType:"과세" }); setModal("add"); };
 
   const saveProduct = async () => {
     setSaving(true);
     const prod = { ...form, buyPrice:+form.buyPrice, sellPrice:+form.sellPrice, stock:+form.stock, taxType:form.taxType||"과세" };
     await dbFns.saveProduct(prod, modal==="add");
+    if (modal==="add") setProducts(prev=>[...prev, prod]);
+    else setProducts(prev=>prev.map(p=>p.id===prod.id?prod:p));
     setSaving(false); setModal(null);
   };
 
@@ -463,6 +460,7 @@ function InventoryPage({ products, setProducts, dbFns }) {
     setSaving(true);
     const newStock = Math.max(0, form.stock + +adjustQty);
     await dbFns.updateStock(form.id, newStock);
+    setProducts(prev=>prev.map(p=>p.id===form.id?{...p,stock:newStock}:p));
     setSaving(false); setModal(null);
   };
 
@@ -479,6 +477,7 @@ function InventoryPage({ products, setProducts, dbFns }) {
           { key:"name",      label:"상품명" },
           { key:"taxType",   label:"과세구분", render:r=><Badge label={r.taxType||"과세"} color={r.taxType==="면세"?COLORS.cyan:COLORS.accent}/> },
           { key:"buyPrice",  label:"매입단가",   align:"right", render:r=>`₩${fmt(r.buyPrice)}` },
+          { key:"sellPrice", label:"매출단가",   align:"right", render:r=>`₩${fmt(r.sellPrice)}` },
           { key:"stock",     label:"현재고",     align:"right", render:r=><span style={{ color:r.stock<100?COLORS.red:COLORS.green, fontWeight:700 }}>{fmt(r.stock)}</span> },
           { key:"value",     label:"재고금액(매입)", align:"right", render:r=>`₩${fmt(r.stock*r.buyPrice)}` },
           { key:"actions",   label:"관리", render:r=>(
@@ -494,7 +493,10 @@ function InventoryPage({ products, setProducts, dbFns }) {
           <span style={{ color:COLORS.textDim, fontWeight:700 }}>총 재고금액 (매입가)</span>
           <span style={{ color:COLORS.accent, fontWeight:800, fontSize:18 }}>₩{fmt(products.reduce((s,p)=>s+p.stock*p.buyPrice,0))}</span>
         </div>
-
+        <div style={{ display:"flex", justifyContent:"space-between", marginTop:8 }}>
+          <span style={{ color:COLORS.textDim, fontWeight:700 }}>총 재고금액 (매출가)</span>
+          <span style={{ color:COLORS.green, fontWeight:800, fontSize:18 }}>₩{fmt(products.reduce((s,p)=>s+p.stock*p.sellPrice,0))}</span>
+        </div>
       </Card>
 
       {(modal==="add"||modal==="edit") && (
@@ -514,7 +516,10 @@ function InventoryPage({ products, setProducts, dbFns }) {
                 ))}
               </div>
             </div>
-            <Input label="매입단가 (원)" type="number" value={form.buyPrice} onChange={e=>setForm({...form,buyPrice:e.target.value})} />
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <Input label="매입단가(원)" type="number" value={form.buyPrice}  onChange={e=>setForm({...form,buyPrice:e.target.value})} />
+              <Input label="매출단가(원)" type="number" value={form.sellPrice} onChange={e=>setForm({...form,sellPrice:e.target.value})} />
+            </div>
             {modal==="add" && <Input label="초기 재고(개)" type="number" value={form.stock} onChange={e=>setForm({...form,stock:e.target.value})} />}
             <div style={{ display:"flex", gap:8, justifyContent:"flex-end", marginTop:8 }}>
               <Btn variant="ghost" onClick={()=>setModal(null)}>취소</Btn>
@@ -546,23 +551,21 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
   const [modal,           setModal]           = useState(false);
   const [filter,          setFilter]          = useState("전체");
   const [commissionModal, setCommissionModal] = useState(null);
-  const [deleteTarget,    setDeleteTarget]    = useState(null);
   const [saving,          setSaving]          = useState(false);
-  const [form, setForm] = useState({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1,price:""}], note:"" });
+  const [form, setForm] = useState({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1}], note:"" });
 
   const allPartners = form.type==="도매" ? wholesalePartners : retailPartners;
-  const calcTotal   = items => items.reduce((s,it)=>{ const price=it.price!==""?+it.price:0; return s+(price*+it.qty); },0);
+  const calcTotal   = items => items.reduce((s,it)=>{ const p=products.find(x=>x.id===it.productId); return s+(p?p.sellPrice*it.qty:0); },0);
 
   const submit = async () => {
     const partner = allPartners.find(p=>p.id===form.partnerId);
     if (!partner || form.items.some(it=>!it.productId)) return alert("거래처와 상품을 모두 선택하세요.");
-    if (form.items.some(it=>!it.price||+it.price===0)) return alert("단가를 입력하세요.");
     setSaving(true);
     const total = calcTotal(form.items);
-    const newOrder = { id:genId("ORD"), date:form.date, type:form.type, partner:partner.name, partnerId:form.partnerId, channel:"", platformOrderId:"", items:form.items.map(it=>({...it,qty:+it.qty,price:+it.price})), status:"대기", total, note:form.note||"" };
+    const newOrder = { id:genId("ORD"), date:form.date, type:form.type, partner:partner.name, partnerId:form.partnerId, channel:"", platformOrderId:"", items:form.items.map(it=>({...it,qty:+it.qty,price:products.find(p=>p.id===it.productId)?.sellPrice||0})), status:"대기", total, note:form.note||"" };
     await dbFns.saveOrder(newOrder);
     setSaving(false); setModal(false);
-    setForm({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1,price:""}], note:"" });
+    setForm({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1}], note:"" });
   };
 
   const processOrder = async (orderId) => {
@@ -604,66 +607,16 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
           { key:"date",    label:"일자" },
           { key:"type",    label:"유형",   render:r=><Badge label={r.type} color={r.type==="도매"?COLORS.purple:COLORS.cyan}/> },
           { key:"partner", label:"거래처" },
-          { key:"items", label:"출고 품목 / 수량 / 단가", render:r=>(
-            <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
-              {r.items.map((it,i)=>{
-                const prod = products.find(p=>p.id===it.productId);
-                return (
-                  <div key={i} style={{ fontSize:12 }}>
-                    <span style={{ color:COLORS.textDim }}>{prod?.name||it.productId}</span>
-                    <span style={{ color:COLORS.text, fontWeight:700 }}> × {fmt(it.qty)}개</span>
-                    {it.price>0 && <span style={{ color:COLORS.textMuted }}> @ ₩{fmt(it.price)}</span>}
-                  </div>
-                );
-              })}
-            </div>
-          )},
+          { key:"items",   label:"품목수", align:"center", render:r=>`${r.items.length}종` },
           { key:"total",   label:"출고금액", align:"right", render:r=>`₩${fmt(r.total)}` },
           { key:"status",  label:"상태",   render:r=><Badge label={r.status} color={r.status==="출고완료"?COLORS.green:COLORS.accent}/> },
           { key:"actions", label:"", render:r=>(
             <div style={{ display:"flex", gap:6 }}>
               {r.status==="대기" && <Btn variant="success" style={{ padding:"4px 10px", fontSize:12 }} onClick={()=>processOrder(r.id)}>출고처리</Btn>}
-              <Btn variant="danger" style={{ padding:"4px 8px", fontSize:12 }} onClick={()=>setDeleteTarget(r)}>🗑️</Btn>
             </div>
           )},
         ]} rows={filtered} />
       </Card>
-
-      {deleteTarget && (
-        <Modal title="출고 삭제 확인" onClose={()=>setDeleteTarget(null)}>
-          <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-            <div style={{ background:COLORS.bg, borderRadius:10, padding:16 }}>
-              <div style={{ color:COLORS.textMuted, fontSize:12, marginBottom:8 }}>삭제할 출고 정보</div>
-              <div style={{ display:"flex", flexDirection:"column", gap:6, fontSize:13 }}>
-                {[
-                  ["주문번호", deleteTarget.id],
-                  ["일자",     deleteTarget.date],
-                  ["거래처",   deleteTarget.partner],
-                  ["출고금액", `₩${fmt(deleteTarget.total)}`],
-                  ["상태",     deleteTarget.status],
-                ].map(([k,v])=>(
-                  <div key={k} style={{ display:"flex", justifyContent:"space-between" }}>
-                    <span style={{ color:COLORS.textMuted }}>{k}</span>
-                    <span style={{ color:COLORS.text, fontWeight:600 }}>{v}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            {deleteTarget.status==="출고완료" && (
-              <div style={{ background:COLORS.red+"11", border:`1px solid ${COLORS.red}44`, borderRadius:8, padding:12, fontSize:12, color:COLORS.red }}>
-                ⚠️ 이미 출고완료된 건입니다. 삭제해도 재고는 자동 복구되지 않습니다. 재고조정에서 수동으로 수정해 주세요.
-              </div>
-            )}
-            <div style={{ background:COLORS.red+"11", border:`1px solid ${COLORS.red}44`, borderRadius:8, padding:12, fontSize:12, color:COLORS.red }}>
-              🗑️ 삭제하면 복구할 수 없습니다. 정말 삭제하시겠습니까?
-            </div>
-            <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
-              <Btn variant="ghost" onClick={()=>setDeleteTarget(null)}>취소</Btn>
-              <Btn variant="danger" onClick={async()=>{ await dbFns.deleteOrder(deleteTarget.id); setDeleteTarget(null); }}>삭제 확인</Btn>
-            </div>
-          </div>
-        </Modal>
-      )}
 
       {commissionModal && (
         <Modal title="영업대행수수료 안내" onClose={()=>setCommissionModal(null)}>
@@ -708,25 +661,17 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
             </Select>
             <div>
               <div style={{ color:COLORS.textDim, fontSize:12, fontWeight:700, marginBottom:8 }}>출고 품목</div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 80px 120px 24px", gap:8, marginBottom:4 }}>
-                <div style={{ color:COLORS.textMuted, fontSize:11 }}>상품명</div>
-                <div style={{ color:COLORS.textMuted, fontSize:11 }}>수량</div>
-                <div style={{ color:COLORS.textMuted, fontSize:11 }}>단가(원) ✏️</div>
-                <div></div>
-              </div>
               {form.items.map((it,i)=>(
-                <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 80px 120px 24px", gap:8, marginBottom:8, alignItems:"center" }}>
+                <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 100px auto", gap:8, marginBottom:8, alignItems:"center" }}>
                   <Select value={it.productId} onChange={e=>setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,productId:e.target.value}:x)})}>
                     <option value="">-- 상품 선택 --</option>
                     {products.map(p=><option key={p.id} value={p.id}>{p.name} (재고:{p.stock})</option>)}
                   </Select>
                   <Input type="number" placeholder="수량" value={it.qty} onChange={e=>setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,qty:e.target.value}:x)})} />
-                  <Input type="number" placeholder="단가 입력" value={it.price} onChange={e=>setForm({...form,items:form.items.map((x,idx)=>idx===i?{...x,price:e.target.value}:x)})}
-                    style={{ border:`1px solid ${COLORS.accent}66` }} />
                   <button onClick={()=>setForm({...form,items:form.items.filter((_,idx)=>idx!==i)})} style={{ background:"none", border:"none", color:COLORS.red, cursor:"pointer", fontSize:16 }}>×</button>
                 </div>
               ))}
-              <Btn variant="ghost" onClick={()=>setForm({...form,items:[...form.items,{productId:"",qty:1,price:""}]})} style={{ fontSize:12 }}>+ 품목 추가</Btn>
+              <Btn variant="ghost" onClick={()=>setForm({...form,items:[...form.items,{productId:"",qty:1}]})} style={{ fontSize:12 }}>+ 품목 추가</Btn>
             </div>
             <div style={{ background:COLORS.bg, borderRadius:8, padding:12 }}>
               <div style={{ display:"flex", justifyContent:"space-between" }}>
@@ -851,6 +796,7 @@ function InvoicesPage({ invoices, setInvoices, dbFns }) {
   const toggleStatus = async (id, current) => {
     const next = current==="미수금"?"완료":"미수금";
     await dbFns.updateInvoiceStatus(id, next);
+    setInvoices(prev=>prev.map(i=>i.id===id?{...i,status:next}:i));
   };
 
   return (
@@ -1063,12 +1009,8 @@ function SalesPage({ orders, products, wholesalePartners, retailPartners }) {
   const wholesale = completed.filter(o=>o.type==="도매");
   const retail    = completed.filter(o=>o.type==="온라인소매");
   const productSales = products.map(p=>{
-    const { sold, revenue } = completed.reduce((acc,o)=>{
-      const it = o.items.find(i=>i.productId===p.id);
-      if(!it) return acc;
-      return { sold:acc.sold+it.qty, revenue:acc.revenue+(it.price||0)*it.qty };
-    },{ sold:0, revenue:0 });
-    const cost = sold * p.buyPrice;
+    const sold = completed.reduce((s,o)=>{ const it=o.items.find(i=>i.productId===p.id); return s+(it?it.qty:0); },0);
+    const revenue=sold*p.sellPrice, cost=sold*p.buyPrice;
     return { ...p, sold, revenue, cost, profit:revenue-cost };
   }).sort((a,b)=>b.revenue-a.revenue);
 
@@ -1105,127 +1047,302 @@ function SalesPage({ orders, products, wholesalePartners, retailPartners }) {
 }
 
 function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
-  const [channel, setChannel] = useState("쿠팡");
-  const [step,    setStep]    = useState(1);
-  const [mapped,  setMapped]  = useState([]);
-  const [imported,setImported]= useState(null);
-  const [error,   setError]   = useState("");
-  const [saving,  setSaving]  = useState(false);
-  const fileRef = useRef();
-
-  const COLS = channel==="쿠팡"
-    ? { date:"주문일",product:"상품명",option:"옵션명",qty:"수량",amount:"결제금액",orderId:"주문번호",status:"주문상태" }
-    : { date:"주문일",product:"상품명",option:"옵션정보",qty:"수량",amount:"결제금액",orderId:"주문번호",status:"주문상태" };
+  const [channel,      setChannel]      = useState("쿠팡");
+  const [step,         setStep]         = useState(1);
+  const [mapped,       setMapped]       = useState([]);
+  const [imported,     setImported]     = useState(null);
+  const [error,        setError]        = useState("");
+  const [saving,       setSaving]       = useState(false);
+  // 네이버 두 파일 상태
+  const [naverOrder,   setNaverOrder]   = useState(null); // 주문내역 파일 rows
+  const [naverSettle,  setNaverSettle]  = useState(null); // 정산내역 파일 rows
+  const [naverOrderName,  setNaverOrderName]  = useState("");
+  const [naverSettleName, setNaverSettleName] = useState("");
+  const orderFileRef  = useRef();
+  const settleFileRef = useRef();
+  const coupangFileRef = useRef();
 
   const partnerId   = channel==="쿠팡"?"R002":"R001";
   const partnerName = retailPartners.find(p=>p.id===partnerId)?.name||channel;
 
-  const parseCSV = text => {
-    const lines = text.trim().split(/\r?\n/);
-    if (lines.length<2) return [];
-    const headers = lines[0].replace(/^\uFEFF/,"").split(",").map(h=>h.trim().replace(/^"|"$/g,""));
-    return lines.slice(1).map(line=>{
-      const cols=[]; let cur="",inQ=false;
-      for(const c of line){ if(c==='"'){inQ=!inQ;}else if(c===","&&!inQ){cols.push(cur.trim());cur="";}else{cur+=c;} }
-      cols.push(cur.trim());
-      const row={}; headers.forEach((h,i)=>{row[h]=(cols[i]||"").replace(/^"|"$/g,"");});
-      return row;
-    });
+  // XLSX 파싱 공통 함수
+  const parseXLSX = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const XLSX = window.XLSX;
+        if (!XLSX) { reject(new Error("XLSX 라이브러리 로딩 중입니다. 잠시 후 다시 시도하세요.")); return; }
+        const wb = XLSX.read(e.target.result, { type:"array", cellDates:true });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { defval:"", raw:false });
+        resolve(rows);
+      } catch(err) { reject(err); }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+
+  // 쿠팡 파일 처리
+  const handleCoupangFile = async (e) => {
+    setError(""); setMapped([]);
+    const file = e.target.files[0]; if(!file) return;
+    try {
+      const rows = await parseXLSX(file);
+      if (!rows.length) { setError("데이터가 없습니다."); return; }
+      if (!Object.prototype.hasOwnProperty.call(rows[0], "주문번호")) {
+        setError(`쿠팡 파일 형식이 맞지 않습니다.\n현재 컬럼: ${Object.keys(rows[0]).slice(0,8).join(", ")}`); return;
+      }
+      const existing = new Set(orders.filter(o=>o.platformOrderId).map(o=>o.platformOrderId));
+      const mappedRows = rows.map((row,i) => {
+        const orderId   = String(row["주문번호"]||"");
+        const rawDate   = String(row["주문일"]||"");
+        const date      = rawDate.slice(0,10).replace(/\//g,"-");
+        const prodName  = String(row["등록상품명"]||"");
+        const option    = String(row["등록옵션명"]||"");
+        const qty       = parseInt(String(row["구매수(수량)"]||"1").replace(/,/g,""))||1;
+        const amount    = parseInt(String(row["결제액"]||"0").replace(/,/g,""))||0;
+        const unitPrice = parseInt(String(row["옵션판매가(판매단가)"]||"0").replace(/,/g,""))||0;
+        const isDup     = existing.has(orderId);
+        const matched   = products.find(p => prodName.includes(p.name.slice(0,4))||p.name.includes(prodName.slice(0,4)));
+        return { orderId, date, productName:prodName, option, qty, amount, unitPrice, matchedProductId:matched?.id||"", isDuplicate:isDup, skip:isDup };
+      });
+      setMapped(mappedRows); setStep(2);
+    } catch(err) { setError("파일 읽기 오류: "+err.message); }
   };
 
-  const handleFile = e => {
-    setError("");
+  // 네이버 - 주문내역 파일 로드
+  const handleNaverOrderFile = async (e) => {
+    setError(""); setNaverOrder(null);
     const file = e.target.files[0]; if(!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        const rows = parseCSV(ev.target.result);
-        if(!rows.length){ setError("데이터가 없거나 형식이 맞지 않습니다."); return; }
-        const existing = new Set(orders.filter(o=>o.platformOrderId).map(o=>o.platformOrderId));
-        const mappedRows = rows.map((row,i)=>{
-          const prodName = row[COLS.product]||"";
-          const matched  = products.find(p=>p.name.includes(prodName.slice(0,6))||prodName.includes(p.name.slice(0,6)));
-          const orderId  = row[COLS.orderId];
-          const isDup    = existing.has(orderId);
-          return { _idx:i, orderId, date:row[COLS.date]?.slice(0,10)||today(), productName:prodName, option:row[COLS.option]||"", qty:parseInt(row[COLS.qty])||1, amount:parseInt((row[COLS.amount]||"0").replace(/,/g,""))||0, matchedProductId:matched?.id||"", isDuplicate:isDup, skip:isDup };
-        });
-        setMapped(mappedRows); setStep(2);
-      } catch(err){ setError("파싱 오류: "+err.message); }
-    };
-    reader.readAsText(file,"utf-8");
+    try {
+      const rows = await parseXLSX(file);
+      if (!rows.length || !Object.prototype.hasOwnProperty.call(rows[0], "상품주문번호")) {
+        setError("주문내역 파일 형식이 맞지 않습니다. '상품주문번호' 컬럼을 확인하세요."); return;
+      }
+      setNaverOrder(rows);
+      setNaverOrderName(file.name);
+    } catch(err) { setError("주문내역 파일 오류: "+err.message); }
+  };
+
+  // 네이버 - 정산내역 파일 로드
+  const handleNaverSettleFile = async (e) => {
+    setError(""); setNaverSettle(null);
+    const file = e.target.files[0]; if(!file) return;
+    try {
+      const rows = await parseXLSX(file);
+      if (!rows.length || !Object.prototype.hasOwnProperty.call(rows[0], "상품주문번호")) {
+        setError("정산내역 파일 형식이 맞지 않습니다. '상품주문번호' 컬럼을 확인하세요."); return;
+      }
+      setNaverSettle(rows);
+      setNaverSettleName(file.name);
+    } catch(err) { setError("정산내역 파일 오류: "+err.message); }
+  };
+
+  // 네이버 두 파일 합산 처리
+  const processNaverFiles = () => {
+    if (!naverOrder || !naverSettle) { setError("주문내역과 정산내역 파일을 모두 업로드해주세요."); return; }
+    setError("");
+    // 정산내역을 상품주문번호 기준 Map으로 변환
+    const settleMap = {};
+    naverSettle.forEach(row => {
+      const key = String(row["상품주문번호"]||"").trim();
+      settleMap[key] = row;
+    });
+    const existing = new Set(orders.filter(o=>o.platformOrderId).map(o=>o.platformOrderId));
+    // 취소완료 제외 후 매칭
+    const validOrders = naverOrder.filter(row => row["클레임상태"] !== "취소완료");
+    const mappedRows = validOrders.map((row) => {
+      const orderId  = String(row["상품주문번호"]||"").trim();
+      const rawDate  = String(row["주문일시"]||"").slice(0,10).replace(/\//g,"-");
+      const prodName = String(row["상품명"]||"");
+      const option   = String(row["옵션정보"]||"");
+      const qty      = parseInt(String(row["수량"]||"1").replace(/,/g,""))||1;
+      // 정산내역에서 결제금액 가져오기
+      const settle   = settleMap[orderId];
+      const amount   = settle ? (parseInt(String(settle["정산기준금액"]||"0").replace(/,/g,""))||0) : 0;
+      const date     = settle ? String(settle["결제일"]||rawDate).replace(/\./g,"-").slice(0,10) : rawDate;
+      const unitPrice = qty > 0 ? Math.round(amount/qty) : 0;
+      const isDup    = existing.has(orderId);
+      const matched  = products.find(p => prodName.includes(p.name.slice(0,4))||p.name.includes(prodName.slice(0,4)));
+      const isCancelled = row["클레임상태"] === "취소완료";
+      return { orderId, date, productName:prodName, option, qty, amount, unitPrice, matchedProductId:matched?.id||"", isDuplicate:isDup, skip:isDup||isCancelled, isCancelled, noSettle: !settle };
+    });
+    // 취소완료 건수 안내
+    const cancelCount = naverOrder.length - validOrders.length;
+    if (cancelCount > 0) console.log(`취소완료 ${cancelCount}건 자동 제외`);
+    setMapped(mappedRows); setStep(2);
   };
 
   const doImport = async () => {
     setSaving(true);
-    const toImport = mapped.filter(r=>!r.skip);
+    const toImport   = mapped.filter(r=>!r.skip);
     const skippedDup = mapped.filter(r=>r.skip&&r.isDuplicate).length;
     const newOrders  = toImport.map(r=>({
-      id:genId("ONL"), date:r.date, type:"온라인소매", partner:partnerName, partnerId, channel, platformOrderId:r.orderId,
-      items:r.matchedProductId?[{productId:r.matchedProductId,qty:r.qty,price:products.find(p=>p.id===r.matchedProductId)?.sellPrice||0}]:[],
-      status:"출고완료", total:r.amount, note:`${channel} 자동가져오기 | ${r.productName}${r.option?" / "+r.option:""}`,
+      id:genId("ONL"), date:r.date, type:"온라인소매",
+      partner:partnerName, partnerId, channel,
+      platformOrderId:r.orderId,
+      items: r.matchedProductId ? [{ productId:r.matchedProductId, qty:r.qty, price:r.unitPrice }] : [],
+      status:"출고완료",
+      total:r.amount,
+      note:`${channel} | ${r.productName}${r.option?" / "+r.option:""}`,
     }));
     for (const order of newOrders) await dbFns.saveOrder(order);
     setSaving(false);
-    setImported({ orders:newOrders, skippedDup });
+    setImported({ orders:newOrders, skippedDup, cancelCount: mapped.filter(r=>r.isCancelled).length });
     setStep(3);
   };
 
-  const reset = () => { setStep(1); setMapped([]); setError(""); if(fileRef.current)fileRef.current.value=""; };
+  const reset = () => {
+    setStep(1); setMapped([]); setError("");
+    setNaverOrder(null); setNaverSettle(null);
+    setNaverOrderName(""); setNaverSettleName("");
+    if(coupangFileRef.current) coupangFileRef.current.value="";
+    if(orderFileRef.current)   orderFileRef.current.value="";
+    if(settleFileRef.current)  settleFileRef.current.value="";
+  };
+
+  const cancelCount = mapped.filter(r=>r.isCancelled).length;
+  const dupCount    = mapped.filter(r=>r.isDuplicate).length;
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
       <div><div style={{ color:COLORS.accent, fontSize:11, fontWeight:700, letterSpacing:2 }}>ONLINE SYNC</div>
         <h2 style={{ color:COLORS.text, fontSize:22, fontWeight:800, margin:0 }}>온라인 매출 가져오기</h2></div>
+
+      {/* 채널 선택 */}
       <div style={{ display:"flex", gap:10 }}>
         {["쿠팡","네이버 스마트스토어"].map(ch=>(
           <button key={ch} onClick={()=>{setChannel(ch);reset();}}
-            style={{ display:"flex",alignItems:"center",gap:8,padding:"12px 20px",borderRadius:10,border:`2px solid ${channel===ch?(ch==="쿠팡"?"#ef4444":"#22c55e"):COLORS.border}`,background:channel===ch?(ch==="쿠팡"?"#ef444422":"#22c55e22"):"transparent",color:channel===ch?(ch==="쿠팡"?"#ef4444":"#22c55e"):COLORS.textDim,cursor:"pointer",fontWeight:700,fontSize:14 }}>
+            style={{ display:"flex",alignItems:"center",gap:8,padding:"12px 20px",borderRadius:10,
+              border:`2px solid ${channel===ch?(ch==="쿠팡"?"#ef4444":"#22c55e"):COLORS.border}`,
+              background:channel===ch?(ch==="쿠팡"?"#ef444422":"#22c55e22"):"transparent",
+              color:channel===ch?(ch==="쿠팡"?"#ef4444":"#22c55e"):COLORS.textDim,
+              cursor:"pointer",fontWeight:700,fontSize:14 }}>
             {ch==="쿠팡"?"🛒":"🟢"} {ch}
           </button>
         ))}
       </div>
 
+      {/* ── STEP 1: 업로드 ── */}
       {step===1 && (
         <Card>
-          <div style={{ color:COLORS.textDim, fontWeight:700, marginBottom:12 }}>📂 CSV 파일 업로드</div>
-          <div style={{ color:COLORS.textMuted, fontSize:12, marginBottom:16 }}>
-            판매자센터에서 주문/발주 내역을 CSV로 다운로드 후 업로드하세요.<br/>
-            필수 컬럼: {Object.values(COLS).join(", ")}
-          </div>
-          <label style={{ display:"inline-flex",alignItems:"center",gap:8,padding:"10px 20px",background:COLORS.accent,color:"#000",borderRadius:8,cursor:"pointer",fontWeight:700 }}>
-            📂 파일 선택
-            <input ref={fileRef} type="file" accept=".csv" style={{ display:"none" }} onChange={handleFile} />
-          </label>
-          {error && <div style={{ marginTop:12,color:COLORS.red,fontSize:12 }}>⚠️ {error}</div>}
+          {channel==="쿠팡" ? (
+            <>
+              <div style={{ color:COLORS.textDim, fontWeight:700, marginBottom:12, fontSize:14 }}>🛒 쿠팡 엑셀 파일 업로드</div>
+              <div style={{ background:COLORS.bg, borderRadius:8, padding:14, marginBottom:16, fontSize:12, color:COLORS.textMuted, lineHeight:2 }}>
+                📌 쿠팡 WING → 주문관리 → <strong style={{ color:COLORS.accent }}>발주/발송 관리</strong> → 기간설정 → 엑셀 다운로드<br/>
+                ✅ .xlsx 파일 그대로 업로드 가능
+              </div>
+              <label style={{ display:"inline-flex",alignItems:"center",gap:8,padding:"12px 24px",background:"#ef4444",color:"#fff",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14 }}>
+                📂 쿠팡 엑셀 파일 선택
+                <input ref={coupangFileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display:"none" }} onChange={handleCoupangFile} />
+              </label>
+            </>
+          ) : (
+            <>
+              <div style={{ color:COLORS.textDim, fontWeight:700, marginBottom:16, fontSize:14 }}>🟢 네이버 스마트스토어 — 파일 2개 업로드</div>
+              <div style={{ background:COLORS.bg, borderRadius:8, padding:14, marginBottom:16, fontSize:12, color:COLORS.textMuted, lineHeight:2 }}>
+                ⚠️ 네이버는 <strong style={{ color:COLORS.accent }}>2개 파일</strong>을 모두 올려야 합니다.<br/>
+                📋 <strong style={{ color:COLORS.text }}>① 주문내역</strong>: 판매관리 → 주문내역 조회 → 엑셀 다운로드 <span style={{ color:COLORS.green }}>(수량/옵션)</span><br/>
+                📋 <strong style={{ color:COLORS.text }}>② 정산내역</strong>: 정산관리 → 정산내역 상세 → 엑셀 다운로드 <span style={{ color:COLORS.green }}>(실제 결제금액)</span><br/>
+                ✅ 두 파일을 주문번호로 자동 매칭 | 취소완료 건 자동 제외
+              </div>
+
+              {/* 파일 1: 주문내역 */}
+              <div style={{ marginBottom:12 }}>
+                <div style={{ color:COLORS.textDim, fontSize:12, fontWeight:700, marginBottom:8 }}>① 주문내역 파일</div>
+                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                  <label style={{ display:"inline-flex",alignItems:"center",gap:8,padding:"10px 20px",
+                    background:naverOrder?COLORS.green+"22":COLORS.surfaceAlt,
+                    border:`1px solid ${naverOrder?COLORS.green:COLORS.border}`,
+                    color:naverOrder?COLORS.green:COLORS.textDim,borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:13 }}>
+                    {naverOrder ? "✅ "+naverOrderName : "📂 주문내역 파일 선택"}
+                    <input ref={orderFileRef} type="file" accept=".xlsx,.xls" style={{ display:"none" }} onChange={handleNaverOrderFile} />
+                  </label>
+                  {naverOrder && <span style={{ color:COLORS.textMuted, fontSize:12 }}>{naverOrder.length}건 로드됨</span>}
+                </div>
+              </div>
+
+              {/* 파일 2: 정산내역 */}
+              <div style={{ marginBottom:16 }}>
+                <div style={{ color:COLORS.textDim, fontSize:12, fontWeight:700, marginBottom:8 }}>② 정산내역 파일</div>
+                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                  <label style={{ display:"inline-flex",alignItems:"center",gap:8,padding:"10px 20px",
+                    background:naverSettle?COLORS.green+"22":COLORS.surfaceAlt,
+                    border:`1px solid ${naverSettle?COLORS.green:COLORS.border}`,
+                    color:naverSettle?COLORS.green:COLORS.textDim,borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:13 }}>
+                    {naverSettle ? "✅ "+naverSettleName : "📂 정산내역 파일 선택"}
+                    <input ref={settleFileRef} type="file" accept=".xlsx,.xls" style={{ display:"none" }} onChange={handleNaverSettleFile} />
+                  </label>
+                  {naverSettle && <span style={{ color:COLORS.textMuted, fontSize:12 }}>{naverSettle.length}건 로드됨</span>}
+                </div>
+              </div>
+
+              {/* 합산 버튼 */}
+              <Btn onClick={processNaverFiles}
+                style={{ opacity:(naverOrder&&naverSettle)?1:0.5, background:(naverOrder&&naverSettle)?COLORS.accent:COLORS.border, color:(naverOrder&&naverSettle)?"#000":COLORS.textMuted, fontSize:14 }}>
+                🔗 두 파일 합산하여 매핑 확인
+              </Btn>
+            </>
+          )}
+          {error && (
+            <div style={{ marginTop:12,background:COLORS.red+"11",border:`1px solid ${COLORS.red}44`,borderRadius:8,padding:12,color:COLORS.red,fontSize:12,whiteSpace:"pre-wrap" }}>
+              ⚠️ {error}
+            </div>
+          )}
         </Card>
       )}
 
+      {/* ── STEP 2: 매핑 확인 ── */}
       {step===2 && (
         <Card>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
-            <div style={{ color:COLORS.cyan,fontWeight:700 }}>✅ {mapped.length}건 파싱 완료</div>
+            <div style={{ color:COLORS.cyan,fontWeight:700,fontSize:14 }}>✅ {mapped.length}건 처리 완료 — 확인 후 가져오기</div>
             <Btn variant="ghost" onClick={reset} style={{ fontSize:12 }}>다시 업로드</Btn>
           </div>
-          {mapped.filter(r=>r.isDuplicate).length>0 && (
-            <div style={{ background:COLORS.accent+"11",border:`1px solid ${COLORS.accent}44`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:12,color:COLORS.accent }}>
-              ⚠️ 중복 주문 {mapped.filter(r=>r.isDuplicate).length}건 — 자동으로 건너뜁니다
-            </div>
-          )}
+          {/* 상태 배너 */}
+          <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
+            {cancelCount>0 && (
+              <div style={{ background:COLORS.red+"11",border:`1px solid ${COLORS.red}44`,borderRadius:8,padding:"8px 14px",fontSize:12,color:COLORS.red }}>
+                🚫 취소완료 {cancelCount}건 자동 제외
+              </div>
+            )}
+            {dupCount>0 && (
+              <div style={{ background:COLORS.accent+"11",border:`1px solid ${COLORS.accent}44`,borderRadius:8,padding:"8px 14px",fontSize:12,color:COLORS.accent }}>
+                ⚠️ 중복 {dupCount}건 자동 건너뜀
+              </div>
+            )}
+          </div>
           <div style={{ overflowX:"auto" }}>
             <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
               <thead><tr style={{ borderBottom:`2px solid ${COLORS.border}` }}>
-                {["건너뛰기","주문번호","주문일","상품명","수량","금액","ERP 상품"].map(h=><th key={h} style={{ padding:"8px 10px",textAlign:"left",color:COLORS.textMuted,fontWeight:600,fontSize:11 }}>{h}</th>)}
+                {["건너뛰기","주문번호","결제일","상품명","옵션","수량","결제금액","단가","ERP 상품"].map(h=>(
+                  <th key={h} style={{ padding:"8px 10px",textAlign:"left",color:COLORS.textMuted,fontWeight:600,fontSize:11,whiteSpace:"nowrap" }}>{h}</th>
+                ))}
               </tr></thead>
               <tbody>{mapped.map((r,i)=>(
-                <tr key={i} style={{ borderBottom:`1px solid ${COLORS.border}22`,opacity:r.skip?0.4:1,background:r.isDuplicate?COLORS.accent+"08":"transparent" }}>
-                  <td style={{ padding:"8px 10px" }}><input type="checkbox" checked={r.skip} onChange={e=>setMapped(prev=>prev.map((x,idx)=>idx===i?{...x,skip:e.target.checked}:x))} /></td>
-                  <td style={{ padding:"8px 10px",color:COLORS.textMuted,fontSize:11 }}>{r.orderId?.slice(-8)}{r.isDuplicate&&<span style={{ color:COLORS.accent,fontSize:9,display:"block" }}>⚠기등록</span>}</td>
-                  <td style={{ padding:"8px 10px",color:COLORS.textDim }}>{r.date}</td>
-                  <td style={{ padding:"8px 10px",color:COLORS.text,maxWidth:180 }}><div style={{ overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{r.productName}</div></td>
-                  <td style={{ padding:"8px 10px",textAlign:"right" }}>{r.qty}</td>
+                <tr key={i} style={{ borderBottom:`1px solid ${COLORS.border}22`, opacity:r.skip?0.4:1,
+                  background:r.isCancelled?COLORS.red+"08":r.isDuplicate?COLORS.accent+"08":"transparent" }}>
+                  <td style={{ padding:"8px 10px" }}>
+                    <input type="checkbox" checked={r.skip} onChange={e=>setMapped(prev=>prev.map((x,idx)=>idx===i?{...x,skip:e.target.checked}:x))} />
+                  </td>
+                  <td style={{ padding:"8px 10px",color:COLORS.textMuted,fontSize:10 }}>
+                    {r.orderId?.slice(-10)}
+                    {r.isCancelled && <span style={{ color:COLORS.red,fontSize:9,display:"block" }}>취소완료</span>}
+                    {r.isDuplicate && <span style={{ color:COLORS.accent,fontSize:9,display:"block" }}>⚠기등록</span>}
+                  </td>
+                  <td style={{ padding:"8px 10px",color:COLORS.textDim,whiteSpace:"nowrap" }}>{r.date}</td>
+                  <td style={{ padding:"8px 10px",color:COLORS.text,maxWidth:140 }}>
+                    <div style={{ overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{r.productName}</div>
+                  </td>
+                  <td style={{ padding:"8px 10px",color:COLORS.textMuted,maxWidth:110 }}>
+                    <div style={{ overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{r.option}</div>
+                  </td>
+                  <td style={{ padding:"8px 10px",textAlign:"right" }}>{fmt(r.qty)}</td>
                   <td style={{ padding:"8px 10px",textAlign:"right",color:COLORS.green }}>₩{fmt(r.amount)}</td>
+                  <td style={{ padding:"8px 10px",textAlign:"right",color:COLORS.accent }}>₩{fmt(r.unitPrice)}</td>
                   <td style={{ padding:"8px 10px",minWidth:160 }}>
-                    <select value={r.matchedProductId} onChange={e=>setMapped(prev=>prev.map((x,idx)=>idx===i?{...x,matchedProductId:e.target.value}:x))}
+                    <select value={r.matchedProductId}
+                      onChange={e=>setMapped(prev=>prev.map((x,idx)=>idx===i?{...x,matchedProductId:e.target.value}:x))}
                       style={{ background:COLORS.bg,border:`1px solid ${r.matchedProductId?COLORS.green:COLORS.red}55`,borderRadius:6,padding:"4px 8px",color:COLORS.text,fontSize:11,width:"100%" }}>
                       <option value="">-- 미매칭 --</option>
                       {products.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
@@ -1237,22 +1354,37 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
           </div>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:16,paddingTop:12,borderTop:`1px solid ${COLORS.border}` }}>
             <div style={{ fontSize:13,color:COLORS.textDim }}>
-              신규: <strong style={{ color:COLORS.green }}>{mapped.filter(r=>!r.skip).length}건</strong>
-              &nbsp;/&nbsp; 중복제외: <strong style={{ color:COLORS.accent }}>{mapped.filter(r=>r.skip&&r.isDuplicate).length}건</strong>
+              가져올 건: <strong style={{ color:COLORS.green }}>{mapped.filter(r=>!r.skip).length}건</strong>
+              {cancelCount>0 && <>&nbsp;/&nbsp; 취소제외: <strong style={{ color:COLORS.red }}>{cancelCount}건</strong></>}
+              {dupCount>0   && <>&nbsp;/&nbsp; 중복제외: <strong style={{ color:COLORS.accent }}>{dupCount}건</strong></>}
+              &nbsp;/&nbsp; 미매핑: <strong style={{ color:COLORS.red }}>{mapped.filter(r=>!r.skip&&!r.matchedProductId).length}건</strong>
             </div>
-            <Btn onClick={doImport} style={{ opacity:saving?0.6:1 }}>{saving?"저장 중...":"✅ 가져오기"}</Btn>
+            <Btn onClick={doImport} style={{ opacity:saving?0.6:1,fontSize:14 }}>
+              {saving?"저장 중...":"✅ "+mapped.filter(r=>!r.skip).length+"건 가져오기"}
+            </Btn>
           </div>
         </Card>
       )}
 
+      {/* ── STEP 3: 완료 ── */}
       {step===3 && imported && (
         <Card style={{ textAlign:"center",padding:32 }}>
-          <div style={{ fontSize:40,marginBottom:12 }}>🎉</div>
-          <div style={{ color:COLORS.green,fontWeight:800,fontSize:20,marginBottom:8 }}>{imported.orders.length}건 등록 완료!</div>
-          <div style={{ display:"flex",justifyContent:"center",gap:24,marginBottom:20 }}>
-            <div><div style={{ color:COLORS.green,fontWeight:800,fontSize:18 }}>{imported.orders.length}</div><div style={{ color:COLORS.textMuted,fontSize:11 }}>신규 등록</div></div>
-            <div><div style={{ color:COLORS.accent,fontWeight:800,fontSize:18 }}>{imported.skippedDup}</div><div style={{ color:COLORS.textMuted,fontSize:11 }}>중복 제외</div></div>
+          <div style={{ fontSize:48,marginBottom:12 }}>🎉</div>
+          <div style={{ color:COLORS.green,fontWeight:800,fontSize:22,marginBottom:16 }}>
+            {imported.orders.length}건 가져오기 완료!
           </div>
+          <div style={{ display:"flex",justifyContent:"center",gap:24,marginBottom:20,flexWrap:"wrap" }}>
+            <div><div style={{ color:COLORS.green,fontWeight:800,fontSize:22 }}>{imported.orders.length}</div><div style={{ color:COLORS.textMuted,fontSize:12 }}>신규 등록</div></div>
+            {imported.cancelCount>0 && <>
+              <div style={{ width:1,background:COLORS.border }} />
+              <div><div style={{ color:COLORS.red,fontWeight:800,fontSize:22 }}>{imported.cancelCount}</div><div style={{ color:COLORS.textMuted,fontSize:12 }}>취소 제외</div></div>
+            </>}
+            {imported.skippedDup>0 && <>
+              <div style={{ width:1,background:COLORS.border }} />
+              <div><div style={{ color:COLORS.accent,fontWeight:800,fontSize:22 }}>{imported.skippedDup}</div><div style={{ color:COLORS.textMuted,fontSize:12 }}>중복 제외</div></div>
+            </>}
+          </div>
+          <div style={{ color:COLORS.textMuted,fontSize:13,marginBottom:20 }}>출고관리 및 매출분석에 자동 반영되었습니다.</div>
           <Btn variant="ghost" onClick={reset}>추가 업로드</Btn>
         </Card>
       )}
