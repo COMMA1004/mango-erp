@@ -559,6 +559,7 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
   const [filter,          setFilter]          = useState("전체");
   const [commissionModal, setCommissionModal] = useState(null);
   const [deleteTarget,    setDeleteTarget]    = useState(null);
+  const [statementOrder,  setStatementOrder]  = useState(null);
   const [saving,          setSaving]          = useState(false);
   const [dateFrom,        setDateFrom]        = useState("");
   const [dateTo,          setDateTo]          = useState("");
