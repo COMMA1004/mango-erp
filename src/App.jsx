@@ -1030,8 +1030,15 @@ function SalesPage({ orders, products, wholesalePartners, retailPartners }) {
   const wholesale = completed.filter(o=>o.type==="도매");
   const retail    = completed.filter(o=>o.type==="온라인소매");
   const productSales = products.map(p=>{
-    const sold = completed.reduce((s,o)=>{ const it=o.items.find(i=>i.productId===p.id); return s+(it?it.qty:0); },0);
-    const revenue=sold*p.sellPrice, cost=sold*p.buyPrice;
+    // 실제 출고단가 기반 매출 계산 (items.price × qty)
+    const { sold, revenue } = completed.reduce((acc,o)=>{
+      const it = o.items.find(i=>i.productId===p.id);
+      if (!it) return acc;
+      // items에 price가 있으면 사용, 없으면 order.total 사용
+      const lineRevenue = it.price>0 ? it.price*it.qty : o.total;
+      return { sold: acc.sold+it.qty, revenue: acc.revenue+lineRevenue };
+    },{ sold:0, revenue:0 });
+    const cost = sold * p.buyPrice;
     return { ...p, sold, revenue, cost, profit:revenue-cost };
   }).sort((a,b)=>b.revenue-a.revenue);
 
