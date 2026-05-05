@@ -930,7 +930,8 @@ function InvoicesPage({ invoices, setInvoices, dbFns }) {
   const [saving, setSaving] = useState(false);
   const [form,   setForm]   = useState({ date:today(), type:"매출", partner:"", amount:"", note:"" });
 
-  const filtered     = tab==="전체" ? invoices : invoices.filter(i=>i.type===tab||i.status===tab);
+  const validInvoices = (invoices||[]).filter(inv=>!inv.note?.includes("수동영업수수료"));
+  const filtered     = tab==="전체" ? validInvoices : validInvoices.filter(i=>i.type===tab||i.status===tab);
   const totalSupply  = filtered.reduce((s,i)=>s+i.amount,0);
   const totalTax     = filtered.reduce((s,i)=>s+i.tax,0);
   const totalAmount  = filtered.reduce((s,i)=>s+i.total,0);
@@ -1296,6 +1297,7 @@ function SalesPage({ orders, products, wholesalePartners, retailPartners, invoic
   // 매입세금계산서 (기간 필터 적용)
   const totalPurchaseInvoice = (invoices||[]).filter(inv=>
     inv.type==="매입" &&
+    !inv.note?.includes("수동영업수수료") &&
     (!dateFrom || inv.date>=dateFrom) &&
     (!dateTo   || inv.date<=dateTo)
   ).reduce((s,inv)=>s+inv.total,0);
