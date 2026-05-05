@@ -927,7 +927,8 @@ function PartnersPage({ wholesalePartners, setWholesalePartners, retailPartners,
 function InvoicesPage({ invoices, setInvoices, dbFns }) {
   const [tab,       setTab]       = useState("전체");
   const [modal,     setModal]     = useState(false);
-  const [editTarget,setEditTarget] = useState(null); // 수정 대상
+  const [editTarget,setEditTarget] = useState(null);
+  const [editForm,  setEditForm]  = useState({ date:"", type:"", partner:"", amount:"", note:"" });
   const [saving,    setSaving]    = useState(false);
   const [form,      setForm]      = useState({ date:today(), type:"매출", partner:"", amount:"", note:"" });
 
@@ -945,6 +946,16 @@ function InvoicesPage({ invoices, setInvoices, dbFns }) {
     await dbFns.saveInvoice(inv);
     setSaving(false); setModal(false);
     setForm({ date:today(), type:"매출", partner:"", amount:"", note:"" });
+  };
+
+  const saveEdit = async () => {
+    if (!editTarget) return;
+    setSaving(true);
+    const amount = +editForm.amount;
+    const tax    = editTarget.type==="매출" ? Math.round(amount*0.1) : 0;
+    const inv = { ...editTarget, date:editForm.date, partner:editForm.partner, amount, tax, total:amount+tax, note:editForm.note||"" };
+    await dbFns.saveInvoice(inv);
+    setSaving(false); setEditTarget(null);
   };
 
   const toggleStatus = async (id, current) => {
@@ -988,7 +999,7 @@ function InvoicesPage({ invoices, setInvoices, dbFns }) {
           { key:"edit", label:"", render:r=>(
             <Btn variant="ghost" style={{ padding:"4px 8px", fontSize:11 }} onClick={()=>{
               setEditTarget(r);
-              setForm({ date:r.date, type:r.type, partner:r.partner, amount:String(r.amount), note:r.note||"" });
+              setEditForm({ date:r.date, type:r.type, partner:r.partner, amount:String(r.amount), note:r.note||"" });
             }}>✏️ 수정</Btn>
           )},
         ]} rows={filtered} />
@@ -1000,17 +1011,17 @@ function InvoicesPage({ invoices, setInvoices, dbFns }) {
             <div style={{ background:COLORS.bg, borderRadius:8, padding:10, fontSize:12, color:COLORS.textMuted }}>
               <span style={{ color:COLORS.accent, fontWeight:700 }}>{editTarget.type}</span> | {editTarget.id}
             </div>
-            <Input label="일자" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-            <Input label="거래처" value={form.partner} onChange={e=>setForm({...form,partner:e.target.value})} />
+            <Input label="일자" type="date" value={editForm.date} onChange={e=>setEditForm({...editForm,date:e.target.value})} />
+            <Input label="거래처" value={editForm.partner} onChange={e=>setEditForm({...editForm,partner:e.target.value})} />
             <Input label={editTarget.type==="매출"?"공급가액(원)":"매입금액(원)"} type="number"
-              value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} />
+              value={editForm.amount} onChange={e=>setEditForm({...editForm,amount:e.target.value})} />
             {editTarget.type==="매출" && (
               <div style={{ background:COLORS.bg, borderRadius:8, padding:10, fontSize:12, color:COLORS.textMuted }}>
-                세액(10%): ₩{fmt(Math.round((+form.amount||0)*0.1))} &nbsp;|&nbsp;
-                합계: ₩{fmt(Math.round((+form.amount||0)*1.1))}
+                세액(10%): ₩{fmt(Math.round((+editForm.amount||0)*0.1))} &nbsp;|&nbsp;
+                합계: ₩{fmt(Math.round((+editForm.amount||0)*1.1))}
               </div>
             )}
-            <Input label="비고" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
+            <Input label="비고" value={editForm.note} onChange={e=>setEditForm({...editForm,note:e.target.value})} />
             <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
               <Btn variant="ghost" onClick={()=>setEditTarget(null)}>취소</Btn>
               <Btn onClick={saveEdit} style={{ opacity:saving?0.6:1 }}>{saving?"저장 중...":"수정 저장"}</Btn>
