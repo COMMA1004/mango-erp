@@ -139,6 +139,18 @@ const TABS = [
 ];
 
 export default function App() {
+  const [xlsxReady, setXlsxReady] = useState(false);
+
+  // SheetJS 동적 로드
+  useEffect(() => {
+    if (window.XLSX) { setXlsxReady(true); return; }
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    script.onload = () => setXlsxReady(true);
+    script.onerror = () => console.error("SheetJS 로드 실패");
+    document.head.appendChild(script);
+  }, []);
+
   const [tab, setTab] = useState("dashboard");
   const [products,          setProducts]          = useState([]);
   const [orders,            setOrders]            = useState([]);
@@ -343,7 +355,7 @@ export default function App() {
 }
 
 // ─── 페이지 라우터 (기존 컴포넌트를 그대로 연결) ─────────────────────────────
-function PageRouter({ tab, products, setProducts, orders, setOrders, invoices, setInvoices, wholesalePartners, setWholesalePartners, retailPartners, setRetailPartners, dbFns }) {
+function PageRouter({ tab, products, setProducts, orders, setOrders, invoices, setInvoices, wholesalePartners, setWholesalePartners, retailPartners, setRetailPartners, dbFns, xlsxReady }) {
   // 이 파일에서는 라우팅만 담당합니다.
   // 각 페이지 컴포넌트는 기존 ERP와 동일하되 DB 저장 함수(dbFns)를 추가로 받습니다.
   const props = { products, setProducts, orders, setOrders, invoices, setInvoices, wholesalePartners, setWholesalePartners, retailPartners, setRetailPartners, dbFns };
@@ -356,7 +368,7 @@ function PageRouter({ tab, products, setProducts, orders, setOrders, invoices, s
     invoices:   <InvoicesPage   {...props} />,
     commission: <CommissionPage {...props} />,
     sales:      <SalesPage      {...props} />,
-    online:     <OnlinePage     {...props} />,
+    online:     <OnlinePage     {...props} xlsxReady={xlsxReady} />,
   };
   return pages[tab] || null;
 }
@@ -1046,7 +1058,7 @@ function SalesPage({ orders, products, wholesalePartners, retailPartners }) {
   );
 }
 
-function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
+function OnlinePage({ orders, setOrders, products, retailPartners, dbFns, xlsxReady }) {
   const [channel,      setChannel]      = useState("쿠팡");
   const [step,         setStep]         = useState(1);
   const [mapped,       setMapped]       = useState([]);
@@ -1067,6 +1079,7 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
 
   // XLSX 파싱 공통 함수
   const parseXLSX = (file) => new Promise((resolve, reject) => {
+    if (!xlsxReady || !window.XLSX) { reject(new Error("엑셀 라이브러리 준비 중입니다. 3초 후 다시 시도하세요.")); return; }
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -1232,9 +1245,14 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
                 📌 쿠팡 WING → 주문관리 → <strong style={{ color:COLORS.accent }}>발주/발송 관리</strong> → 기간설정 → 엑셀 다운로드<br/>
                 ✅ .xlsx 파일 그대로 업로드 가능
               </div>
-              <label style={{ display:"inline-flex",alignItems:"center",gap:8,padding:"12px 24px",background:"#ef4444",color:"#fff",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14 }}>
-                📂 쿠팡 엑셀 파일 선택
-                <input ref={coupangFileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display:"none" }} onChange={handleCoupangFile} />
+              {!xlsxReady && (
+                <div style={{ background:COLORS.accent+"11", border:`1px solid ${COLORS.accent}44`, borderRadius:8, padding:"8px 14px", marginBottom:12, fontSize:12, color:COLORS.accent }}>
+                  ⏳ 엑셀 라이브러리 로딩 중... 잠시 후 파일을 선택하세요.
+                </div>
+              )}
+              <label style={{ display:"inline-flex",alignItems:"center",gap:8,padding:"12px 24px",background:xlsxReady?"#ef4444":COLORS.border,color:"#fff",borderRadius:8,cursor:xlsxReady?"pointer":"not-allowed",fontWeight:700,fontSize:14, opacity:xlsxReady?1:0.6 }}>
+                {xlsxReady ? "📂 쿠팡 엑셀 파일 선택" : "⏳ 로딩 중..."}
+                <input ref={coupangFileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display:"none" }} onChange={handleCoupangFile} disabled={!xlsxReady} />
               </label>
             </>
           ) : (
@@ -1248,15 +1266,21 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
               </div>
 
               {/* 파일 1: 주문내역 */}
+              {!xlsxReady && (
+                <div style={{ background:COLORS.accent+"11", border:`1px solid ${COLORS.accent}44`, borderRadius:8, padding:"8px 14px", marginBottom:12, fontSize:12, color:COLORS.accent }}>
+                  ⏳ 엑셀 라이브러리 로딩 중... 잠시 후 파일을 선택하세요.
+                </div>
+              )}
               <div style={{ marginBottom:12 }}>
                 <div style={{ color:COLORS.textDim, fontSize:12, fontWeight:700, marginBottom:8 }}>① 주문내역 파일</div>
                 <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                   <label style={{ display:"inline-flex",alignItems:"center",gap:8,padding:"10px 20px",
                     background:naverOrder?COLORS.green+"22":COLORS.surfaceAlt,
                     border:`1px solid ${naverOrder?COLORS.green:COLORS.border}`,
-                    color:naverOrder?COLORS.green:COLORS.textDim,borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:13 }}>
-                    {naverOrder ? "✅ "+naverOrderName : "📂 주문내역 파일 선택"}
-                    <input ref={orderFileRef} type="file" accept=".xlsx,.xls" style={{ display:"none" }} onChange={handleNaverOrderFile} />
+                    color:naverOrder?COLORS.green:COLORS.textDim,borderRadius:8,cursor:xlsxReady?"pointer":"not-allowed",fontWeight:700,fontSize:13,
+                    opacity:xlsxReady?1:0.6 }}>
+                    {naverOrder ? "✅ "+naverOrderName : (xlsxReady ? "📂 주문내역 파일 선택" : "⏳ 로딩 중...")}
+                    <input ref={orderFileRef} type="file" accept=".xlsx,.xls" style={{ display:"none" }} onChange={handleNaverOrderFile} disabled={!xlsxReady} />
                   </label>
                   {naverOrder && <span style={{ color:COLORS.textMuted, fontSize:12 }}>{naverOrder.length}건 로드됨</span>}
                 </div>
