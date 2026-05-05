@@ -1047,6 +1047,24 @@ function SalesPage({ orders, products, wholesalePartners, retailPartners }) {
   );
 }
 
+// 옵션명에서 실제 수량 추출 (낱개 기준)
+// 예: "20개 망고아이스바 70g" → 20
+// 예: "10개묶음x2" → 20
+function extractQtyFromOption(optionStr) {
+  if (!optionStr) return null;
+  const s = String(optionStr);
+  // "10개묶음x2", "10개 묶음 x 5" 형태
+  const bundleMatch = s.match(/(\d+)\s*개\s*묶음?\s*[xX×]\s*(\d+)/);
+  if (bundleMatch) return parseInt(bundleMatch[1]) * parseInt(bundleMatch[2]);
+  // "X 20개", "× 20개" 형태
+  const multiMatch = s.match(/[xX×]\s*(\d+)\s*개/);
+  if (multiMatch) return parseInt(multiMatch[1]);
+  // 단순 "20개" 형태
+  const simpleMatch = s.match(/(\d+)\s*개/);
+  if (simpleMatch) return parseInt(simpleMatch[1]);
+  return null;
+}
+
 // 상품 자동 매칭 함수 - 키워드 기반
 function matchProduct(platformName, products) {
   if (!platformName) return null;
@@ -1116,7 +1134,9 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
         const unitPrice = parseInt(String(row["옵션판매가(판매단가)"]||"0").replace(/,/g,""))||0;
         const isDup     = existing.has(orderId);
         const matched   = matchProduct(prodName, products);
-        return { orderId, date, productName:prodName, option, qty, amount, unitPrice, matchedProductId:matched?.id||"", isDuplicate:isDup, skip:isDup };
+        // 옵션명에서 실제 낱개 수량 추출
+        const actualQty = extractQtyFromOption(option) || qty;
+        return { orderId, date, productName:prodName, option, qty, actualQty, amount, unitPrice, matchedProductId:matched?.id||"", isDuplicate:isDup, skip:isDup };
       });
       setMapped(mappedRows); setStep(2);
     } catch(err) { setError("파일 읽기 오류: "+err.message); }
@@ -1175,9 +1195,10 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
       const date     = settle ? String(settle["결제일"]||rawDate).replace(/\./g,"-").slice(0,10) : rawDate;
       const unitPrice = qty > 0 ? Math.round(amount/qty) : 0;
       const isDup    = existing.has(orderId);
-      const matched  = matchProduct(prodName, products);
+      const matched   = matchProduct(prodName, products);
+      const actualQty = extractQtyFromOption(option) || qty;
       const isCancelled = row["클레임상태"] === "취소완료";
-      return { orderId, date, productName:prodName, option, qty, amount, unitPrice, matchedProductId:matched?.id||"", isDuplicate:isDup, skip:isDup||isCancelled, isCancelled, noSettle: !settle };
+      return { orderId, date, productName:prodName, option, qty, actualQty, amount, unitPrice, matchedProductId:matched?.id||"", isDuplicate:isDup, skip:isDup||isCancelled, isCancelled, noSettle: !settle };
     });
     // 취소완료 건수 안내
     const cancelCount = naverOrder.length - validOrders.length;
@@ -1199,8 +1220,19 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
       note:`${channel} | ${r.productName}${r.option?" / "+r.option:""}`,
     }));
     for (const order of newOrders) await dbFns.saveOrder(order);
+    // 재고 차감 (상품별 actualQty 합산)
+    const stockDeduct = {};
+    toImport.forEach(r => {
+      if (r.matchedProductId) {
+        stockDeduct[r.matchedProductId] = (stockDeduct[r.matchedProductId]||0) + (r.actualQty||r.qty);
+      }
+    });
+    for (const [productId, deductQty] of Object.entries(stockDeduct)) {
+      const prod = products.find(p=>p.id===productId);
+      if (prod) await dbFns.updateStock(productId, Math.max(0, prod.stock - deductQty));
+    }
     setSaving(false);
-    setImported({ orders:newOrders, skippedDup, cancelCount: mapped.filter(r=>r.isCancelled).length });
+    setImported({ orders:newOrders, skippedDup, cancelCount: mapped.filter(r=>r.isCancelled).length, stockDeduct });
     setStep(3);
   };
 
@@ -1328,7 +1360,7 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
           <div style={{ overflowX:"auto" }}>
             <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
               <thead><tr style={{ borderBottom:`2px solid ${COLORS.border}` }}>
-                {["건너뛰기","주문번호","결제일","상품명","옵션","수량","결제금액","단가","ERP 상품"].map(h=>(
+                {["건너뛰기","주문번호","결제일","상품명","옵션","수량","실재고차감","결제금액","단가","ERP 상품"].map(h=>(
                   <th key={h} style={{ padding:"8px 10px",textAlign:"left",color:COLORS.textMuted,fontWeight:600,fontSize:11,whiteSpace:"nowrap" }}>{h}</th>
                 ))}
               </tr></thead>
@@ -1351,6 +1383,11 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
                     <div style={{ overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{r.option}</div>
                   </td>
                   <td style={{ padding:"8px 10px",textAlign:"right" }}>{fmt(r.qty)}</td>
+                  <td style={{ padding:"8px 10px",textAlign:"right" }}>
+                    <span style={{ color:(r.actualQty&&r.actualQty!==r.qty)?COLORS.accent:COLORS.textMuted, fontWeight:(r.actualQty&&r.actualQty!==r.qty)?700:400 }}>
+                      {fmt(r.actualQty||r.qty)}개
+                    </span>
+                  </td>
                   <td style={{ padding:"8px 10px",textAlign:"right",color:COLORS.green }}>₩{fmt(r.amount)}</td>
                   <td style={{ padding:"8px 10px",textAlign:"right",color:COLORS.accent }}>₩{fmt(r.unitPrice)}</td>
                   <td style={{ padding:"8px 10px",minWidth:160 }}>
@@ -1397,7 +1434,21 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
               <div><div style={{ color:COLORS.accent,fontWeight:800,fontSize:22 }}>{imported.skippedDup}</div><div style={{ color:COLORS.textMuted,fontSize:12 }}>중복 제외</div></div>
             </>}
           </div>
-          <div style={{ color:COLORS.textMuted,fontSize:13,marginBottom:20 }}>출고관리 및 매출분석에 자동 반영되었습니다.</div>
+          <div style={{ color:COLORS.textMuted,fontSize:13,marginBottom:12 }}>출고관리 및 매출분석에 자동 반영되었습니다.</div>
+          {imported.stockDeduct && Object.keys(imported.stockDeduct).length>0 && (
+            <div style={{ background:COLORS.green+"11", border:`1px solid ${COLORS.green}33`, borderRadius:10, padding:14, marginBottom:16, textAlign:"left" }}>
+              <div style={{ color:COLORS.green, fontWeight:700, fontSize:13, marginBottom:8 }}>📦 재고 자동 차감 완료</div>
+              {Object.entries(imported.stockDeduct).map(([pid, qty])=>{
+                const prod = products.find(p=>p.id===pid);
+                return (
+                  <div key={pid} style={{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"3px 0" }}>
+                    <span style={{ color:COLORS.textDim }}>{prod?.name||pid}</span>
+                    <span style={{ color:COLORS.red, fontWeight:700 }}>- {fmt(qty)}개</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <Btn variant="ghost" onClick={reset}>추가 업로드</Btn>
         </Card>
       )}
