@@ -556,7 +556,10 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
   const [modal,           setModal]           = useState(false);
   const [filter,          setFilter]          = useState("전체");
   const [commissionModal, setCommissionModal] = useState(null);
+  const [deleteTarget,    setDeleteTarget]    = useState(null);
   const [saving,          setSaving]          = useState(false);
+  const [dateFrom,        setDateFrom]        = useState("");
+  const [dateTo,          setDateTo]          = useState("");
   const [form, setForm] = useState({ date:today(), type:"도매", partnerId:"", items:[{productId:"",qty:1}], note:"" });
 
   const allPartners = form.type==="도매" ? wholesalePartners : retailPartners;
@@ -592,7 +595,50 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
   };
 
   const filtered = (filter==="전체" ? orders : orders.filter(o=>o.type===filter||o.status===filter))
+    .filter(o => (!dateFrom || o.date >= dateFrom) && (!dateTo || o.date <= dateTo))
     .slice().sort((a,b) => b.date.localeCompare(a.date));
+
+  // 기간별 매출 집계
+  const summaryWholesale = filtered.filter(o=>o.type==="도매"&&o.status==="출고완료");
+  const summaryOnline    = filtered.filter(o=>o.type==="온라인소매"&&o.status==="출고완료");
+  const totalWholesale   = summaryWholesale.reduce((s,o)=>s+o.total,0);
+  const totalOnline      = summaryOnline.reduce((s,o)=>s+o.total,0);
+
+  // 엑셀 다운로드
+  const downloadExcel = () => {
+    const rows = filtered.map(o => {
+      const itemDesc = o.items.map(it=>{
+        const prod = products.find(p=>p.id===it.productId);
+        return `${prod?.name||it.productId} × ${it.qty}개`;
+      }).join(", ");
+      return {
+        "주문번호": o.id,
+        "일자": o.date,
+        "유형": o.type,
+        "거래처": o.partner,
+        "상품내역": itemDesc || o.note || "",
+        "출고금액": o.total,
+        "상태": o.status,
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    // 컬럼 너비 설정
+    ws["!cols"] = [
+      {wch:20},{wch:12},{wch:10},{wch:20},{wch:40},{wch:14},{wch:10}
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "출고현황");
+    // 도매 시트
+    const wsW = XLSX.utils.json_to_sheet(rows.filter(r=>r["유형"]==="도매"));
+    wsW["!cols"] = [{wch:20},{wch:12},{wch:10},{wch:20},{wch:40},{wch:14},{wch:10}];
+    XLSX.utils.book_append_sheet(wb, wsW, "도매");
+    // 온라인소매 시트
+    const wsO = XLSX.utils.json_to_sheet(rows.filter(r=>r["유형"]==="온라인소매"));
+    wsO["!cols"] = [{wch:20},{wch:12},{wch:10},{wch:20},{wch:40},{wch:14},{wch:10}];
+    XLSX.utils.book_append_sheet(wb, wsO, "온라인소매");
+    const period = dateFrom&&dateTo ? `_${dateFrom}~${dateTo}` : "";
+    XLSX.writeFile(wb, `출고현황${period}.xlsx`);
+  };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
@@ -601,6 +647,29 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
           <h2 style={{ color:COLORS.text, fontSize:22, fontWeight:800, margin:0 }}>출고 관리</h2></div>
         <Btn onClick={()=>setModal(true)}>+ 출고 등록</Btn>
       </div>
+
+      {/* 기간 설정 + 매출 요약 */}
+      <Card>
+        <div style={{ display:"flex", gap:12, alignItems:"flex-end", flexWrap:"wrap" }}>
+          <Input label="시작일" type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={{ width:150 }} />
+          <Input label="종료일" type="date" value={dateTo}   onChange={e=>setDateTo(e.target.value)}   style={{ width:150 }} />
+          <Btn variant="ghost" onClick={()=>{setDateFrom("");setDateTo("");}}>전체</Btn>
+          <Btn onClick={downloadExcel} style={{ marginLeft:"auto" }}>📥 엑셀 다운로드</Btn>
+        </div>
+        {/* 매출 요약 */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginTop:16 }}>
+          {[
+            { label:"도매 매출",    value:`₩${fmt(totalWholesale)}`, sub:`${summaryWholesale.length}건`, color:COLORS.purple },
+            { label:"온라인 매출",  value:`₩${fmt(totalOnline)}`,    sub:`${summaryOnline.length}건`,    color:COLORS.cyan   },
+            { label:"합계",         value:`₩${fmt(totalWholesale+totalOnline)}`, sub:`${summaryWholesale.length+summaryOnline.length}건`, color:COLORS.accent },
+          ].map(s=>(
+            <div key={s.label} style={{ background:COLORS.bg, borderRadius:10, padding:"12px 16px", borderLeft:`3px solid ${s.color}` }}>
+              <div style={{ color:s.color, fontSize:18, fontWeight:800 }}>{s.value}</div>
+              <div style={{ color:COLORS.textMuted, fontSize:12, marginTop:2 }}>{s.label} · {s.sub}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
       <div style={{ display:"flex", gap:8 }}>
         {["전체","도매","온라인소매","대기","출고완료"].map(f=>(
           <button key={f} onClick={()=>setFilter(f)} style={{ padding:"6px 14px", borderRadius:20, border:`1px solid ${filter===f?COLORS.accent:COLORS.border}`, background:filter===f?COLORS.accent+"22":"transparent", color:filter===f?COLORS.accent:COLORS.textMuted, cursor:"pointer", fontSize:12, fontWeight:600 }}>{f}</button>
