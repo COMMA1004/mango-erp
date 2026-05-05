@@ -295,7 +295,12 @@ export default function App() {
     </div>
   );
 
-  const dbFns = { saveProduct, updateStock, saveOrder, updateOrderStatus, saveInvoice, updateInvoiceStatus, saveWholesalePartner, updateWholesalePartner, saveRetailPartner };
+  const deleteOrder = async (id) => {
+    const { error } = await supabase.from("orders").delete().eq("id", id);
+    if (error) alert("삭제 실패: " + error.message);
+  };
+
+  const dbFns = { saveProduct, updateStock, saveOrder, updateOrderStatus, deleteOrder, saveInvoice, updateInvoiceStatus, saveWholesalePartner, updateWholesalePartner, saveRetailPartner };
 
   return (
     <div style={{ display:"flex", height:"100vh", background:COLORS.bg, fontFamily:"'Pretendard','Apple SD Gothic Neo',sans-serif", color:COLORS.text }}>
@@ -361,7 +366,7 @@ function PageRouter({ tab, products, setProducts, orders, setOrders, invoices, s
     partners:   <PartnersPage   {...props} />,
     invoices:   <InvoicesPage   {...props} />,
     commission: <CommissionPage {...props} />,
-    sales:      <SalesPage      {...props} invoices={invoices} />,
+    sales:      <SalesPage      {...props} />,
     online:     <OnlinePage     {...props} />,
     settle:     <SettlePage     {...props} />,
   };
@@ -1151,80 +1156,29 @@ function CommissionPage({ orders, wholesalePartners, products, invoices, setInvo
   );
 }
 
-function SalesPage({ orders, products, wholesalePartners, retailPartners, invoices }) {
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo,   setDateTo]   = useState("");
-
-  // 기간 필터 적용
-  const completed = orders.filter(o =>
-    o.status==="출고완료" &&
-    (!dateFrom || o.date>=dateFrom) &&
-    (!dateTo   || o.date<=dateTo)
-  );
+function SalesPage({ orders, products, wholesalePartners, retailPartners }) {
+  const completed = orders.filter(o=>o.status==="출고완료");
   const wholesale = completed.filter(o=>o.type==="도매");
   const retail    = completed.filter(o=>o.type==="온라인소매");
-
-  // 상품별 판매 실적 (order.total 기반)
   const productSales = products.map(p=>{
     const { sold, revenue } = completed.reduce((acc,o)=>{
       const it = o.items.find(i=>i.productId===p.id);
       if (!it) return acc;
-      return { sold:acc.sold+it.qty, revenue:acc.revenue+o.total };
+      return { sold: acc.sold + it.qty, revenue: acc.revenue + o.total };
     },{ sold:0, revenue:0 });
     const cost = sold * p.buyPrice;
     return { ...p, sold, revenue, cost, profit:revenue-cost };
   }).sort((a,b)=>b.revenue-a.revenue);
 
-  // ── 종합 손익 계산 ──────────────────────────────
-  const totalRevenue  = completed.reduce((s,o)=>s+o.total,0);
-  const totalCOGS     = productSales.reduce((s,p)=>s+p.cost,0); // 상품원가
-
-  // 영업수수료 (해당 기간 도매 출고 기준 자동 계산)
-  const totalCommission = wholesale.reduce((s,o)=>{
-    const partner  = wholesalePartners.find(p=>p.id===o.partnerId);
-    const commInfo = getCommissionInfo(partner?.commissionType||"없음");
-    if (commInfo.rate===0) return s;
-    return s + Math.round(o.total * commInfo.rate);
-  },0);
-
-  // 매입세금계산서 (세금계산서 탭 매입건, 기간 필터 적용)
-  const totalPurchaseInvoice = invoices.filter(inv=>
-    inv.type==="매입" &&
-    (!dateFrom || inv.date>=dateFrom) &&
-    (!dateTo   || inv.date<=dateTo)
-  ).reduce((s,inv)=>s+inv.total,0);
-
-  const totalCost   = totalCOGS + totalCommission + totalPurchaseInvoice;
-  const totalProfit = totalRevenue - totalCost;
-  const marginRate  = totalRevenue>0 ? Math.round((totalProfit/totalRevenue)*100) : 0;
-
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:24 }}>
-      <div>
-        <div style={{ color:COLORS.accent, fontSize:11, fontWeight:700, letterSpacing:2 }}>ANALYTICS</div>
-        <h2 style={{ color:COLORS.text, fontSize:22, fontWeight:800, margin:0 }}>매출 분석</h2>
-      </div>
-
-      {/* 기간 설정 */}
-      <Card>
-        <div style={{ display:"flex", gap:12, alignItems:"flex-end" }}>
-          <Input label="시작일" type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={{ width:150 }} />
-          <Input label="종료일" type="date" value={dateTo}   onChange={e=>setDateTo(e.target.value)}   style={{ width:150 }} />
-          <Btn variant="ghost" onClick={()=>{setDateFrom("");setDateTo("");}}>전체기간</Btn>
-          {(dateFrom||dateTo) && (
-            <div style={{ color:COLORS.accent, fontSize:12, fontWeight:600 }}>
-              {dateFrom||"시작"} ~ {dateTo||"현재"} 기준
-            </div>
-          )}
-        </div>
-      </Card>
-
-      {/* 매출 요약 */}
+      <div><div style={{ color:COLORS.accent, fontSize:11, fontWeight:700, letterSpacing:2 }}>ANALYTICS</div>
+        <h2 style={{ color:COLORS.text, fontSize:22, fontWeight:800, margin:0 }}>매출 분석</h2></div>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:16 }}>
         {[
-          { label:"도매 매출",   value:`₩${fmt(wholesale.reduce((s,o)=>s+o.total,0))}`, sub:`${wholesale.length}건`, color:COLORS.purple },
-          { label:"온라인 매출", value:`₩${fmt(retail.reduce((s,o)=>s+o.total,0))}`,    sub:`${retail.length}건`,    color:COLORS.cyan   },
-          { label:"총 매출",     value:`₩${fmt(totalRevenue)}`,                          sub:`${completed.length}건`, color:COLORS.green  },
+          { label:"도매 매출",    value:`₩${fmt(wholesale.reduce((s,o)=>s+o.total,0))}`, sub:`${wholesale.length}건`, color:COLORS.purple },
+          { label:"온라인 매출",  value:`₩${fmt(retail.reduce((s,o)=>s+o.total,0))}`,    sub:`${retail.length}건`,    color:COLORS.cyan   },
+          { label:"총 매출 이익", value:`₩${fmt(productSales.reduce((s,p)=>s+p.profit,0))}`, sub:"공급가-매입가",     color:COLORS.green  },
         ].map(s=>(
           <Card key={s.label} style={{ borderBottom:`3px solid ${s.color}` }}>
             <div style={{ color:s.color, fontSize:20, fontWeight:800 }}>{s.value}</div>
@@ -1233,69 +1187,159 @@ function SalesPage({ orders, products, wholesalePartners, retailPartners, invoic
           </Card>
         ))}
       </div>
-
-      {/* 상품별 판매 실적 */}
       <Card>
         <div style={{ color:COLORS.textDim, fontSize:12, fontWeight:700, marginBottom:16 }}>📊 상품별 판매 실적</div>
         <Table cols={[
           { key:"name",    label:"상품명" },
           { key:"sold",    label:"판매량",  align:"right", render:r=>`${fmt(r.sold)}개` },
           { key:"revenue", label:"매출액",  align:"right", render:r=><span style={{ color:COLORS.green }}>₩{fmt(r.revenue)}</span> },
-          { key:"cost",    label:"상품원가",align:"right", render:r=><span style={{ color:COLORS.textMuted }}>₩{fmt(r.cost)}</span> },
-          { key:"profit",  label:"상품이익",align:"right", render:r=><span style={{ color:r.profit>0?COLORS.accent:COLORS.red, fontWeight:700 }}>₩{fmt(r.profit)}</span> },
+          { key:"cost",    label:"매입원가",align:"right", render:r=><span style={{ color:COLORS.textMuted }}>₩{fmt(r.cost)}</span> },
+          { key:"profit",  label:"이익",    align:"right", render:r=><span style={{ color:r.profit>0?COLORS.accent:COLORS.red, fontWeight:700 }}>₩{fmt(r.profit)}</span> },
           { key:"margin",  label:"이익률",  align:"right", render:r=>{ const m=r.revenue>0?Math.round((r.profit/r.revenue)*100):0; return <Badge label={`${m}%`} color={m>30?COLORS.green:COLORS.accent}/>; }},
         ]} rows={productSales} />
-      </Card>
-
-      {/* 종합 손익 계산서 */}
-      <Card style={{ borderLeft:`3px solid ${totalProfit>0?COLORS.green:COLORS.red}` }}>
-        <div style={{ color:COLORS.textDim, fontSize:12, fontWeight:700, marginBottom:16 }}>📋 종합 손익 계산서</div>
-        <div style={{ display:"flex", flexDirection:"column", gap:0 }}>
-
-          {/* 매출액 */}
-          <div style={{ display:"flex", justifyContent:"space-between", padding:"10px 0", borderBottom:`1px solid ${COLORS.border}` }}>
-            <span style={{ color:COLORS.text, fontWeight:700 }}>총 매출액</span>
-            <span style={{ color:COLORS.green, fontWeight:800, fontSize:16 }}>₩{fmt(totalRevenue)}</span>
-          </div>
-
-          {/* 매입원가 항목들 */}
-          <div style={{ padding:"10px 0 4px", color:COLORS.textMuted, fontSize:12, fontWeight:700 }}>(-) 매입원가 및 비용</div>
-
-          {[
-            { label:"① 상품원가 (매입단가 × 판매수량)", value:totalCOGS, color:COLORS.textDim },
-            { label:"② 영업대행수수료 (도매 출고 기준 자동계산)", value:totalCommission, color:COLORS.purple },
-            { label:"③ 매입세금계산서 (기간 내 매입 합계)", value:totalPurchaseInvoice, color:COLORS.cyan },
-          ].map(item=>(
-            <div key={item.label} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0 8px 16px", borderBottom:`1px dashed ${COLORS.border}` }}>
-              <span style={{ color:COLORS.textDim, fontSize:13 }}>{item.label}</span>
-              <span style={{ color:item.color, fontWeight:600 }}>- ₩{fmt(item.value)}</span>
-            </div>
-          ))}
-
-          {/* 총 비용 */}
-          <div style={{ display:"flex", justifyContent:"space-between", padding:"10px 0", borderBottom:`2px solid ${COLORS.border}` }}>
-            <span style={{ color:COLORS.text, fontWeight:700 }}>총 비용 합계</span>
-            <span style={{ color:COLORS.red, fontWeight:800, fontSize:15 }}>- ₩{fmt(totalCost)}</span>
-          </div>
-
-          {/* 순이익 */}
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 0 4px" }}>
-            <span style={{ color:COLORS.text, fontWeight:800, fontSize:16 }}>순 이익</span>
-            <div style={{ textAlign:"right" }}>
-              <div style={{ color:totalProfit>0?COLORS.green:COLORS.red, fontWeight:900, fontSize:22 }}>
-                {totalProfit<0?"-":""}₩{fmt(Math.abs(totalProfit))}
-              </div>
-              <div style={{ marginTop:4 }}>
-                <Badge label={`이익률 ${marginRate}%`} color={marginRate>20?COLORS.green:marginRate>0?COLORS.accent:COLORS.red} />
-              </div>
-            </div>
-          </div>
-        </div>
       </Card>
     </div>
   );
 }
 
+// 옵션명에서 실제 수량 추출 (낱개 기준)
+// 예: "20개 망고아이스바 70g" → 20
+// 예: "10개묶음x2" → 20
+function extractQtyFromOption(optionStr) {
+  if (!optionStr) return null;
+  const s = String(optionStr);
+  // "10개묶음x2", "10개 묶음 x 5" 형태
+  const bundleMatch = s.match(/(\d+)\s*개\s*묶음?\s*[xX×]\s*(\d+)/);
+  if (bundleMatch) return parseInt(bundleMatch[1]) * parseInt(bundleMatch[2]);
+  // "X 20개", "× 20개" 형태
+  const multiMatch = s.match(/[xX×]\s*(\d+)\s*개/);
+  if (multiMatch) return parseInt(multiMatch[1]);
+  // 단순 "20개" 형태
+  const simpleMatch = s.match(/(\d+)\s*개/);
+  if (simpleMatch) return parseInt(simpleMatch[1]);
+  return null;
+}
+
+// 상품 자동 매칭 함수 - 키워드 기반
+function matchProduct(platformName, products) {
+  if (!platformName) return null;
+  const name = platformName.toLowerCase().replace(/\s+/g,"").replace(/-/g,"");
+  const nameKws = name.match(/[가-힣]+|[a-z0-9]+/g) || [];
+  // ERP 상품 키워드와 1개 이상 일치하면 매칭
+  return products.find(p => {
+    const erpKws = p.name.toLowerCase().replace(/\s+/g,"").replace(/-/g,"").match(/[가-힣]+|[a-z0-9]+/g) || [];
+    const matchCount = erpKws.filter(ew => ew.length >= 2 && nameKws.some(nw => ew.includes(nw) || nw.includes(ew))).length;
+    return matchCount >= 1;
+  }) || null;
+}
+
+// ─── 거래명세서 ──────────────────────────────────────────────────────────────
+function DeliveryStatement({ order, products, wholesalePartners, retailPartners, onClose }) {
+  const partner = [...wholesalePartners, ...retailPartners].find(p=>p.id===order.partnerId)||{};
+  const isWholesale = wholesalePartners.find(p=>p.id===order.partnerId);
+  const itemsWithTax = order.items.map(it=>{
+    const prod = products.find(p=>p.id===it.productId);
+    const isTaxable = (prod?.taxType||"과세")==="과세";
+    const rowSupply = it.price * it.qty;
+    const rowTax = isTaxable ? Math.round(rowSupply*0.1) : 0;
+    return { ...it, prod, isTaxable, rowSupply, rowTax };
+  });
+  const supply = itemsWithTax.reduce((s,it)=>s+it.rowSupply,0);
+  const tax    = itemsWithTax.reduce((s,it)=>s+it.rowTax,0);
+  const total  = supply+tax;
+  const printStyle = `@media print { body * { visibility:hidden; } #settle-print, #settle-print * { visibility:visible; } #settle-print { position:fixed; left:0; top:0; width:100%; } .no-print { display:none !important; } }`;
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"#000c", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={onClose}>
+      <style>{printStyle}</style>
+      <div id="settle-print" style={{ background:"#fff", borderRadius:12, padding:40, width:740, maxHeight:"92vh", overflowY:"auto", color:"#111", fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif" }} onClick={e=>e.stopPropagation()}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:24, paddingBottom:16, borderBottom:"3px solid #f59e0b" }}>
+          <div>
+            <div style={{ fontSize:26, fontWeight:900, letterSpacing:-1 }}>거 래 명 세 서</div>
+            <div style={{ fontSize:12, color:"#666", marginTop:4 }}>DELIVERY STATEMENT</div>
+          </div>
+          <div style={{ textAlign:"right" }}>
+            <div style={{ fontSize:12, color:"#888" }}>발행일자</div>
+            <div style={{ fontSize:14, fontWeight:700 }}>{order.date}</div>
+          </div>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:20 }}>
+          {[
+            { label:"공 급 자", color:"#f59e0b", rows:[["상 호","주식회사 콤마"],["대 표 자","임성근"],["사업자번호","855-88-01315"],["업 태","도소매"],["종 목","수입식품 수입판매업 외"],["주 소","경기도 안양시 동안구 엘에스로 136, 1603호"]] },
+            { label:"공급받는자", color:"#22d3ee", rows:[["상 호",partner.name||"-"],["대 표 자",partner.ceo||"-"],["사업자번호",partner.bizNo||"-"],["주 소",partner.addr||"-"],["연 락 처",partner.tel||"-"],["유 형",isWholesale?"도매":"온라인소매"]] },
+          ].map(sec=>(
+            <div key={sec.label} style={{ border:"1px solid #ddd", borderRadius:8, padding:14 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:sec.color, marginBottom:8 }}>{sec.label}</div>
+              <table style={{ width:"100%", fontSize:12, borderCollapse:"collapse" }}>
+                {sec.rows.map(([k,v])=>(
+                  <tr key={k}><td style={{ color:"#888", padding:"3px 0", width:70, fontSize:11 }}>{k}</td><td style={{ color:"#111", fontWeight:600, padding:"3px 0" }}>{v}</td></tr>
+                ))}
+              </table>
+            </div>
+          ))}
+        </div>
+        <table style={{ width:"100%", borderCollapse:"collapse", marginBottom:16, fontSize:13 }}>
+          <thead>
+            <tr style={{ background:"#f8f8f8", borderTop:"2px solid #333", borderBottom:"1px solid #ccc" }}>
+              {["No","품 목 명","규격","수량","단가","공급가액","세액(10%)","합계"].map(h=>(
+                <th key={h} style={{ padding:"9px 8px", textAlign:"center", fontWeight:700, fontSize:12, color:"#333" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {itemsWithTax.map((it,i)=>(
+              <tr key={i} style={{ borderBottom:"1px solid #eee" }}>
+                <td style={{ padding:"8px", textAlign:"center", color:"#666" }}>{i+1}</td>
+                <td style={{ padding:"8px" }}>{it.prod?.name||it.productId}{!it.isTaxable&&<span style={{ marginLeft:4, fontSize:10, background:"#e0f7fa", color:"#0097a7", borderRadius:3, padding:"1px 4px" }}>면세</span>}</td>
+                <td style={{ padding:"8px", textAlign:"center", color:"#666" }}>{it.prod?.unit||"개"}</td>
+                <td style={{ padding:"8px", textAlign:"right", fontWeight:700 }}>{fmt(it.qty)}</td>
+                <td style={{ padding:"8px", textAlign:"right" }}>₩{fmt(it.price)}</td>
+                <td style={{ padding:"8px", textAlign:"right" }}>₩{fmt(it.rowSupply)}</td>
+                <td style={{ padding:"8px", textAlign:"right", color:it.isTaxable?"#888":"#bbb" }}>{it.isTaxable?`₩${fmt(it.rowTax)}`:"면세"}</td>
+                <td style={{ padding:"8px", textAlign:"right", fontWeight:700 }}>₩{fmt(it.rowSupply+it.rowTax)}</td>
+              </tr>
+            ))}
+            {Array.from({length:Math.max(0,5-itemsWithTax.length)}).map((_,i)=>(
+              <tr key={`e${i}`} style={{ borderBottom:"1px solid #eee" }}>{[...Array(8)].map((_,j)=><td key={j} style={{ padding:"8px", height:32 }}>&nbsp;</td>)}</tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr style={{ background:"#fffbeb", borderTop:"2px solid #f59e0b" }}>
+              <td colSpan={5} style={{ padding:"10px 8px", fontWeight:700, textAlign:"right" }}>합 계</td>
+              <td style={{ padding:"10px 8px", textAlign:"right", fontWeight:800 }}>₩{fmt(supply)}</td>
+              <td style={{ padding:"10px 8px", textAlign:"right", fontWeight:800 }}>₩{fmt(tax)}</td>
+              <td style={{ padding:"10px 8px", textAlign:"right", fontWeight:900, color:"#f59e0b", fontSize:15 }}>₩{fmt(total)}</td>
+            </tr>
+          </tfoot>
+        </table>
+        <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:20 }}>
+          <div style={{ border:"2px solid #f59e0b", borderRadius:8, padding:"12px 20px", minWidth:280 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"3px 0" }}><span style={{ color:"#888" }}>공급가액</span><span style={{ fontWeight:600 }}>₩{fmt(supply)}</span></div>
+            <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"3px 0" }}><span style={{ color:"#888" }}>부가세(10%)</span><span style={{ fontWeight:600 }}>₩{fmt(tax)}</span></div>
+            <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0 0", marginTop:6, borderTop:"1px solid #f59e0b", fontSize:16 }}>
+              <span style={{ fontWeight:800 }}>청구금액</span>
+              <span style={{ color:"#f59e0b", fontWeight:900 }}>₩{fmt(total)}</span>
+            </div>
+          </div>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:20 }}>
+          {["공급자 확인","공급받는자 확인"].map(label=>(
+            <div key={label} style={{ border:"1px solid #ddd", borderRadius:8, padding:"12px 16px", minHeight:60 }}>
+              <div style={{ fontSize:11, color:"#aaa", marginBottom:8 }}>{label}</div>
+              <div style={{ fontSize:12, color:"#ccc" }}>(서명 / 날인)</div>
+            </div>
+          ))}
+        </div>
+        <div className="no-print" style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+          <button onClick={onClose} style={{ padding:"10px 20px", borderRadius:8, border:"1px solid #ddd", background:"#f5f5f5", cursor:"pointer", fontSize:13 }}>닫기</button>
+          <button onClick={()=>window.print()} style={{ padding:"10px 24px", borderRadius:8, border:"none", background:"#f59e0b", color:"#000", fontWeight:700, cursor:"pointer", fontSize:13 }}>🖨️ 인쇄 / PDF</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── 도매정산마감 ────────────────────────────────────────────────────────────
 function SettlePage({ orders, wholesalePartners, products }) {
   const nowYM = today().slice(0,7);
   const [selectedYM,  setSelectedYM]  = useState(nowYM);
