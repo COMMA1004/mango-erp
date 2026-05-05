@@ -48,7 +48,11 @@ const calcCommission = (base, type) => {
 // ─── Utilities ────────────────────────────────────────────────────────────────
 const fmt   = (n) => n?.toLocaleString("ko-KR") ?? "0";
 const today = () => new Date().toISOString().slice(0, 10);
-const genId = (prefix) => `${prefix}-${Date.now().toString().slice(-6)}`;
+const genId = (prefix) => {
+  const ts  = Date.now().toString(36);
+  const rnd = Math.random().toString(36).slice(2, 6);
+  return `${prefix}-${ts}${rnd}`.toUpperCase();
+};
 const lastDayOfMonth = (ym) => { const [y,m] = ym.split("-").map(Number); return new Date(y,m,0).getDate(); };
 
 // DB 컬럼명 ↔ JS 필드명 변환
