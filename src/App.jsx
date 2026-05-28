@@ -1887,10 +1887,10 @@ function DeliveryStatement({ order, products, wholesalePartners, retailPartners,
                 <td style={{ padding:"8px" }}>{it.prod?.name||it.productId}{!it.isTaxable&&<span style={{ marginLeft:4, fontSize:10, background:"#e0f7fa", color:"#0097a7", borderRadius:3, padding:"1px 4px" }}>면세</span>}</td>
                 <td style={{ padding:"8px", textAlign:"center", color:"#666" }}>{it.prod?.unit||"개"}</td>
                 <td style={{ padding:"8px", textAlign:"right", fontWeight:700 }}>{fmt(it.qty)}</td>
-                <td style={{ padding:"8px", textAlign:"right" }}>₩{fmt(it.price||0)}</td>
-                <td style={{ padding:"8px", textAlign:"right" }}>₩{fmt(it.rowSupply)}</td>
-                <td style={{ padding:"8px", textAlign:"right", color:it.isTaxable?"#888":"#bbb" }}>{it.isTaxable?`₩${fmt(it.rowTax)}`:"면세"}</td>
-                <td style={{ padding:"8px", textAlign:"right", fontWeight:700 }}>₩{fmt(it.rowSupply+it.rowTax)}</td>
+                <td style={{ padding:"8px" }}>&nbsp;</td>
+                <td style={{ padding:"8px" }}>&nbsp;</td>
+                <td style={{ padding:"8px" }}>&nbsp;</td>
+                <td style={{ padding:"8px" }}>&nbsp;</td>
               </tr>
             ))}
             {Array.from({length:Math.max(0,5-itemsWithTax.length)}).map((_,i)=>(
@@ -1900,19 +1900,19 @@ function DeliveryStatement({ order, products, wholesalePartners, retailPartners,
           <tfoot>
             <tr style={{ background:"#fffbeb", borderTop:"2px solid #f59e0b" }}>
               <td colSpan={5} style={{ padding:"10px 8px", fontWeight:700, textAlign:"right" }}>합 계</td>
-              <td style={{ padding:"10px 8px", textAlign:"right", fontWeight:800 }}>₩{fmt(supply)}</td>
-              <td style={{ padding:"10px 8px", textAlign:"right", fontWeight:800 }}>₩{fmt(tax)}</td>
-              <td style={{ padding:"10px 8px", textAlign:"right", fontWeight:900, color:"#f59e0b", fontSize:15 }}>₩{fmt(total)}</td>
+              <td style={{ padding:"10px 8px" }}>&nbsp;</td>
+              <td style={{ padding:"10px 8px" }}>&nbsp;</td>
+              <td style={{ padding:"10px 8px" }}>&nbsp;</td>
             </tr>
           </tfoot>
         </table>
         <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:20 }}>
           <div style={{ border:"2px solid #f59e0b", borderRadius:8, padding:"12px 20px", minWidth:280 }}>
-            <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"3px 0" }}><span style={{ color:"#888" }}>공급가액</span><span style={{ fontWeight:600 }}>₩{fmt(supply)}</span></div>
-            <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"3px 0" }}><span style={{ color:"#888" }}>부가세(10%)</span><span style={{ fontWeight:600 }}>₩{fmt(tax)}</span></div>
+            <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"3px 0" }}><span style={{ color:"#888" }}>공급가액</span><span style={{ fontWeight:600 }}>&nbsp;</span></div>
+            <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"3px 0" }}><span style={{ color:"#888" }}>부가세(10%)</span><span style={{ fontWeight:600 }}>&nbsp;</span></div>
             <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0 0", marginTop:6, borderTop:"1px solid #f59e0b", fontSize:16 }}>
               <span style={{ fontWeight:800 }}>청구금액</span>
-              <span style={{ color:"#f59e0b", fontWeight:900 }}>₩{fmt(total)}</span>
+              <span style={{ color:"#f59e0b", fontWeight:900 }}>&nbsp;</span>
             </div>
           </div>
         </div>
