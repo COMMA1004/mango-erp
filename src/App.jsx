@@ -1827,6 +1827,113 @@ function CommStatement({ data, supplier, onClose }) {
   );
 }
 
+// ─── 거래명세서 ──────────────────────────────────────────────────────────────
+function DeliveryStatement({ order, products, wholesalePartners, retailPartners, onClose }) {
+  const partner = [...(wholesalePartners||[]), ...(retailPartners||[])].find(p=>p.id===order.partnerId)||{};
+  const isWholesale = (wholesalePartners||[]).find(p=>p.id===order.partnerId);
+  const itemsWithTax = (order.items||[]).map(it=>{
+    const prod = products.find(p=>p.id===it.productId);
+    const isTaxable = (prod?.taxType||"과세")==="과세";
+    const rowSupply = (it.price||0) * it.qty;
+    const rowTax = isTaxable ? Math.round(rowSupply*0.1) : 0;
+    return { ...it, prod, isTaxable, rowSupply, rowTax };
+  });
+  const supply = itemsWithTax.reduce((s,it)=>s+it.rowSupply,0);
+  const tax    = itemsWithTax.reduce((s,it)=>s+it.rowTax,0);
+  const total  = supply+tax;
+  const printStyle = `@media print { body * { visibility:hidden; } #settle-print, #settle-print * { visibility:visible; } #settle-print { position:fixed; left:0; top:0; width:100%; } .no-print { display:none !important; } }`;
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"#000c", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={onClose}>
+      <style>{printStyle}</style>
+      <div id="settle-print" style={{ background:"#fff", borderRadius:12, padding:40, width:740, maxHeight:"92vh", overflowY:"auto", color:"#111", fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif" }} onClick={e=>e.stopPropagation()}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:24, paddingBottom:16, borderBottom:"3px solid #f59e0b" }}>
+          <div>
+            <div style={{ fontSize:26, fontWeight:900, letterSpacing:-1 }}>거 래 명 세 서</div>
+            <div style={{ fontSize:12, color:"#666", marginTop:4 }}>DELIVERY STATEMENT</div>
+          </div>
+          <div style={{ textAlign:"right" }}>
+            <div style={{ fontSize:12, color:"#888" }}>발행일자</div>
+            <div style={{ fontSize:14, fontWeight:700 }}>{order.date}</div>
+          </div>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:20 }}>
+          {[
+            { label:"공 급 자", color:"#f59e0b", rows:[["상 호","주식회사 콤마"],["대 표 자","임성근"],["사업자번호","855-88-01315"],["업 태","도소매"],["종 목","수입식품 수입판매업 외"],["주 소","경기도 안양시 동안구 엘에스로 136, 1603호"]] },
+            { label:"공급받는자", color:"#22d3ee", rows:[["상 호",partner.name||"-"],["대 표 자",partner.ceo||"-"],["사업자번호",partner.bizNo||"-"],["주 소",partner.addr||"-"],["연 락 처",partner.tel||"-"],["유 형",isWholesale?"도매":"온라인소매"]] },
+          ].map(sec=>(
+            <div key={sec.label} style={{ border:"1px solid #ddd", borderRadius:8, padding:14 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:sec.color, marginBottom:8 }}>{sec.label}</div>
+              <table style={{ width:"100%", fontSize:12, borderCollapse:"collapse" }}>
+                {sec.rows.map(([k,v])=>(
+                  <tr key={k}><td style={{ color:"#888", padding:"3px 0", width:70, fontSize:11 }}>{k}</td><td style={{ color:"#111", fontWeight:600, padding:"3px 0" }}>{v}</td></tr>
+                ))}
+              </table>
+            </div>
+          ))}
+        </div>
+        <table style={{ width:"100%", borderCollapse:"collapse", marginBottom:16, fontSize:13 }}>
+          <thead>
+            <tr style={{ background:"#f8f8f8", borderTop:"2px solid #333", borderBottom:"1px solid #ccc" }}>
+              {["No","품 목 명","규격","수량","단가","공급가액","세액(10%)","합계"].map(h=>(
+                <th key={h} style={{ padding:"9px 8px", textAlign:"center", fontWeight:700, fontSize:12, color:"#333" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {itemsWithTax.map((it,i)=>(
+              <tr key={i} style={{ borderBottom:"1px solid #eee" }}>
+                <td style={{ padding:"8px", textAlign:"center", color:"#666" }}>{i+1}</td>
+                <td style={{ padding:"8px" }}>{it.prod?.name||it.productId}{!it.isTaxable&&<span style={{ marginLeft:4, fontSize:10, background:"#e0f7fa", color:"#0097a7", borderRadius:3, padding:"1px 4px" }}>면세</span>}</td>
+                <td style={{ padding:"8px", textAlign:"center", color:"#666" }}>{it.prod?.unit||"개"}</td>
+                <td style={{ padding:"8px", textAlign:"right", fontWeight:700 }}>{fmt(it.qty)}</td>
+                <td style={{ padding:"8px", textAlign:"right" }}>₩{fmt(it.price||0)}</td>
+                <td style={{ padding:"8px", textAlign:"right" }}>₩{fmt(it.rowSupply)}</td>
+                <td style={{ padding:"8px", textAlign:"right", color:it.isTaxable?"#888":"#bbb" }}>{it.isTaxable?`₩${fmt(it.rowTax)}`:"면세"}</td>
+                <td style={{ padding:"8px", textAlign:"right", fontWeight:700 }}>₩{fmt(it.rowSupply+it.rowTax)}</td>
+              </tr>
+            ))}
+            {Array.from({length:Math.max(0,5-itemsWithTax.length)}).map((_,i)=>(
+              <tr key={`e${i}`} style={{ borderBottom:"1px solid #eee" }}>{[...Array(8)].map((_,j)=><td key={j} style={{ padding:"8px", height:32 }}>&nbsp;</td>)}</tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr style={{ background:"#fffbeb", borderTop:"2px solid #f59e0b" }}>
+              <td colSpan={5} style={{ padding:"10px 8px", fontWeight:700, textAlign:"right" }}>합 계</td>
+              <td style={{ padding:"10px 8px", textAlign:"right", fontWeight:800 }}>₩{fmt(supply)}</td>
+              <td style={{ padding:"10px 8px", textAlign:"right", fontWeight:800 }}>₩{fmt(tax)}</td>
+              <td style={{ padding:"10px 8px", textAlign:"right", fontWeight:900, color:"#f59e0b", fontSize:15 }}>₩{fmt(total)}</td>
+            </tr>
+          </tfoot>
+        </table>
+        <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:20 }}>
+          <div style={{ border:"2px solid #f59e0b", borderRadius:8, padding:"12px 20px", minWidth:280 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"3px 0" }}><span style={{ color:"#888" }}>공급가액</span><span style={{ fontWeight:600 }}>₩{fmt(supply)}</span></div>
+            <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"3px 0" }}><span style={{ color:"#888" }}>부가세(10%)</span><span style={{ fontWeight:600 }}>₩{fmt(tax)}</span></div>
+            <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0 0", marginTop:6, borderTop:"1px solid #f59e0b", fontSize:16 }}>
+              <span style={{ fontWeight:800 }}>청구금액</span>
+              <span style={{ color:"#f59e0b", fontWeight:900 }}>₩{fmt(total)}</span>
+            </div>
+          </div>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:20 }}>
+          {["공급자 확인","공급받는자 확인"].map(label=>(
+            <div key={label} style={{ border:"1px solid #ddd", borderRadius:8, padding:"12px 16px", minHeight:60 }}>
+              <div style={{ fontSize:11, color:"#aaa", marginBottom:8 }}>{label}</div>
+              <div style={{ fontSize:12, color:"#ccc" }}>(서명 / 날인)</div>
+            </div>
+          ))}
+        </div>
+        <div className="no-print" style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+          <button onClick={onClose} style={{ padding:"10px 20px", borderRadius:8, border:"1px solid #ddd", background:"#f5f5f5", cursor:"pointer", fontSize:13 }}>닫기</button>
+          <button onClick={()=>window.print()} style={{ padding:"10px 24px", borderRadius:8, border:"none", background:"#f59e0b", color:"#000", fontWeight:700, cursor:"pointer", fontSize:13 }}>🖨️ 인쇄 / PDF</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
   const [channel,      setChannel]      = useState("쿠팡");
   const [step,         setStep]         = useState(1);
