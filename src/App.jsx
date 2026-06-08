@@ -2033,14 +2033,14 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
     // 정산내역을 상품주문번호 기준 Map으로 변환
     const settleMap = {};
     naverSettle.forEach(row => {
-      const key = String(row["상품주문번호"]||"").trim();
+      const key = String(row["상품주문번호"]||"").trim().replace(/\.0$/, "");
       settleMap[key] = row;
     });
     const existing = new Set(orders.filter(o=>o.platformOrderId).map(o=>o.platformOrderId));
     // 취소완료 제외 후 매칭
     const validOrders = naverOrder.filter(row => row["클레임상태"] !== "취소완료");
     const mappedRows = validOrders.map((row) => {
-      const orderId  = String(row["상품주문번호"]||"").trim();
+      const orderId  = String(row["상품주문번호"]||"").trim().replace(/\.0$/, "");
       const rawDate  = String(row["주문일시"]||"").slice(0,10).replace(/\//g,"-");
       const prodName = String(row["상품명"]||"");
       const option   = String(row["옵션정보"]||"");
