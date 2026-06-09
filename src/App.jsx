@@ -165,7 +165,7 @@ export default function App() {
           supabase.from("products").select("*").order("id"),
           supabase.from("wholesale_partners").select("*").order("id"),
           supabase.from("retail_partners").select("*").order("id"),
-          supabase.from("orders").select("*").order("created_at", { ascending: false }),
+          supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(50000),
           supabase.from("invoices").select("*").order("date", { ascending: false }),
         ]);
         if (p.error || wp.error || rp.error || o.error || inv.error) throw new Error("DB 연결 오류");
@@ -612,9 +612,6 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
   const summaryOnline    = filtered.filter(o=>o.type==="온라인소매"&&o.status==="출고완료");
   const totalWholesale   = summaryWholesale.reduce((s,o)=>s+o.total,0);
   const totalOnline      = summaryOnline.reduce((s,o)=>s+o.total,0);
-  // 출고 수량 합계
-  const qtyWholesale = summaryWholesale.reduce((s,o)=>s+o.items.reduce((a,it)=>a+it.qty,0),0);
-  const qtyOnline    = summaryOnline.reduce((s,o)=>s+o.items.reduce((a,it)=>a+it.qty,0),0);
 
   // 엑셀 다운로드
   const downloadExcel = () => {
@@ -671,14 +668,13 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
         {/* 매출 요약 */}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginTop:16 }}>
           {[
-            { label:"도매 매출",   value:`₩${fmt(totalWholesale)}`, sub:`${summaryWholesale.length}건`, qty:qtyWholesale, color:COLORS.purple },
-            { label:"온라인 매출", value:`₩${fmt(totalOnline)}`,    sub:`${summaryOnline.length}건`,    qty:qtyOnline,    color:COLORS.cyan   },
-            { label:"합계",        value:`₩${fmt(totalWholesale+totalOnline)}`, sub:`${summaryWholesale.length+summaryOnline.length}건`, qty:qtyWholesale+qtyOnline, color:COLORS.accent },
+            { label:"도매 매출",    value:`₩${fmt(totalWholesale)}`, sub:`${summaryWholesale.length}건`, color:COLORS.purple },
+            { label:"온라인 매출",  value:`₩${fmt(totalOnline)}`,    sub:`${summaryOnline.length}건`,    color:COLORS.cyan   },
+            { label:"합계",         value:`₩${fmt(totalWholesale+totalOnline)}`, sub:`${summaryWholesale.length+summaryOnline.length}건`, color:COLORS.accent },
           ].map(s=>(
             <div key={s.label} style={{ background:COLORS.bg, borderRadius:10, padding:"12px 16px", borderLeft:`3px solid ${s.color}` }}>
               <div style={{ color:s.color, fontSize:18, fontWeight:800 }}>{s.value}</div>
               <div style={{ color:COLORS.textMuted, fontSize:12, marginTop:2 }}>{s.label} · {s.sub}</div>
-              <div style={{ color:s.color, fontSize:13, fontWeight:700, marginTop:4 }}>{fmt(s.qty)}개 출고</div>
             </div>
           ))}
         </div>
