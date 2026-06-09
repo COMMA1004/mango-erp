@@ -612,6 +612,9 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
   const summaryOnline    = filtered.filter(o=>o.type==="온라인소매"&&o.status==="출고완료");
   const totalWholesale   = summaryWholesale.reduce((s,o)=>s+o.total,0);
   const totalOnline      = summaryOnline.reduce((s,o)=>s+o.total,0);
+  // 출고 수량 합계
+  const qtyWholesale = summaryWholesale.reduce((s,o)=>s+o.items.reduce((a,it)=>a+it.qty,0),0);
+  const qtyOnline    = summaryOnline.reduce((s,o)=>s+o.items.reduce((a,it)=>a+it.qty,0),0);
 
   // 엑셀 다운로드
   const downloadExcel = () => {
@@ -668,13 +671,14 @@ function OrdersPage({ orders, setOrders, products, setProducts, wholesalePartner
         {/* 매출 요약 */}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginTop:16 }}>
           {[
-            { label:"도매 매출",    value:`₩${fmt(totalWholesale)}`, sub:`${summaryWholesale.length}건`, color:COLORS.purple },
-            { label:"온라인 매출",  value:`₩${fmt(totalOnline)}`,    sub:`${summaryOnline.length}건`,    color:COLORS.cyan   },
-            { label:"합계",         value:`₩${fmt(totalWholesale+totalOnline)}`, sub:`${summaryWholesale.length+summaryOnline.length}건`, color:COLORS.accent },
+            { label:"도매 매출",   value:`₩${fmt(totalWholesale)}`, sub:`${summaryWholesale.length}건`, qty:qtyWholesale, color:COLORS.purple },
+            { label:"온라인 매출", value:`₩${fmt(totalOnline)}`,    sub:`${summaryOnline.length}건`,    qty:qtyOnline,    color:COLORS.cyan   },
+            { label:"합계",        value:`₩${fmt(totalWholesale+totalOnline)}`, sub:`${summaryWholesale.length+summaryOnline.length}건`, qty:qtyWholesale+qtyOnline, color:COLORS.accent },
           ].map(s=>(
             <div key={s.label} style={{ background:COLORS.bg, borderRadius:10, padding:"12px 16px", borderLeft:`3px solid ${s.color}` }}>
               <div style={{ color:s.color, fontSize:18, fontWeight:800 }}>{s.value}</div>
               <div style={{ color:COLORS.textMuted, fontSize:12, marginTop:2 }}>{s.label} · {s.sub}</div>
+              <div style={{ color:s.color, fontSize:13, fontWeight:700, marginTop:4 }}>{fmt(s.qty)}개 출고</div>
             </div>
           ))}
         </div>
@@ -1933,34 +1937,6 @@ function DeliveryStatement({ order, products, wholesalePartners, retailPartners,
   );
 }
 
-
-// 옵션명에서 실제 낱개 수량 추출
-function extractQtyFromOption(optionStr) {
-  if (!optionStr) return null;
-  const s = String(optionStr);
-  // "10개묶음x2", "10개 묶음 x 5" 형태
-  const bundleMatch = s.match(/(\d+)\s*개\s*묶음?\s*[xX×]\s*(\d+)/);
-  if (bundleMatch) return parseInt(bundleMatch[1]) * parseInt(bundleMatch[2]);
-  // "X 20개", "× 20개" 형태
-  const multiMatch = s.match(/[xX×]\s*(\d+)\s*개/);
-  if (multiMatch) return parseInt(multiMatch[1]);
-  // 단순 "20개" 형태
-  const simpleMatch = s.match(/(\d+)\s*개/);
-  if (simpleMatch) return parseInt(simpleMatch[1]);
-  return null;
-}
-
-// 상품 자동 매칭 함수 - 키워드 기반
-function matchProduct(platformName, products) {
-  if (!platformName) return null;
-  const name = platformName.toLowerCase().replace(/\s+/g,"").replace(/-/g,"");
-  const nameKws = name.match(/[가-힣]+|[a-z0-9]+/g) || [];
-  return products.find(p => {
-    const erpKws = p.name.toLowerCase().replace(/\s+/g,"").replace(/-/g,"").match(/[가-힣]+|[a-z0-9]+/g) || [];
-    const matchCount = erpKws.filter(ew => ew.length >= 2 && nameKws.some(nw => ew.includes(nw) || nw.includes(ew))).length;
-    return matchCount >= 1;
-  }) || null;
-}
 
 function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
   const [channel,      setChannel]      = useState("쿠팡");
