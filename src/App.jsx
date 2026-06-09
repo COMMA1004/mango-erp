@@ -1934,6 +1934,34 @@ function DeliveryStatement({ order, products, wholesalePartners, retailPartners,
 }
 
 
+// 옵션명에서 실제 낱개 수량 추출
+function extractQtyFromOption(optionStr) {
+  if (!optionStr) return null;
+  const s = String(optionStr);
+  // "10개묶음x2", "10개 묶음 x 5" 형태
+  const bundleMatch = s.match(/(\d+)\s*개\s*묶음?\s*[xX×]\s*(\d+)/);
+  if (bundleMatch) return parseInt(bundleMatch[1]) * parseInt(bundleMatch[2]);
+  // "X 20개", "× 20개" 형태
+  const multiMatch = s.match(/[xX×]\s*(\d+)\s*개/);
+  if (multiMatch) return parseInt(multiMatch[1]);
+  // 단순 "20개" 형태
+  const simpleMatch = s.match(/(\d+)\s*개/);
+  if (simpleMatch) return parseInt(simpleMatch[1]);
+  return null;
+}
+
+// 상품 자동 매칭 함수 - 키워드 기반
+function matchProduct(platformName, products) {
+  if (!platformName) return null;
+  const name = platformName.toLowerCase().replace(/\s+/g,"").replace(/-/g,"");
+  const nameKws = name.match(/[가-힣]+|[a-z0-9]+/g) || [];
+  return products.find(p => {
+    const erpKws = p.name.toLowerCase().replace(/\s+/g,"").replace(/-/g,"").match(/[가-힣]+|[a-z0-9]+/g) || [];
+    const matchCount = erpKws.filter(ew => ew.length >= 2 && nameKws.some(nw => ew.includes(nw) || nw.includes(ew))).length;
+    return matchCount >= 1;
+  }) || null;
+}
+
 function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
   const [channel,      setChannel]      = useState("쿠팡");
   const [step,         setStep]         = useState(1);
@@ -2033,14 +2061,14 @@ function OnlinePage({ orders, setOrders, products, retailPartners, dbFns }) {
     // 정산내역을 상품주문번호 기준 Map으로 변환
     const settleMap = {};
     naverSettle.forEach(row => {
-      const key = String(row["상품주문번호"]||"").trim().replace(/\.0$/, "");
+      const key = String(row["상품주문번호"]||"").trim();
       settleMap[key] = row;
     });
     const existing = new Set(orders.filter(o=>o.platformOrderId).map(o=>o.platformOrderId));
     // 취소완료 제외 후 매칭
     const validOrders = naverOrder.filter(row => row["클레임상태"] !== "취소완료");
     const mappedRows = validOrders.map((row) => {
-      const orderId  = String(row["상품주문번호"]||"").trim().replace(/\.0$/, "");
+      const orderId  = String(row["상품주문번호"]||"").trim();
       const rawDate  = String(row["주문일시"]||"").slice(0,10).replace(/\//g,"-");
       const prodName = String(row["상품명"]||"");
       const option   = String(row["옵션정보"]||"");
